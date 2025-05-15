@@ -1,0 +1,38 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  PACKAGE_NAME: "rec_op_lem_prices"
+  TWINE_USERNAME: "recreation"
+  TWINE_PASSWORD: "${CI_JOB_TOKEN}" # Automatically set by GitLab CI/CD
+
+before_script:
+  - python -m pip install --upgrade pip
+  - pip install build twine wheel
+
+build:
+  stage: build
+  image: python:3.11
+  tags:
+    - docker
+  script:
+    - export PACKAGE_VERSION=$(python setup.py --version) # Extracts version
+    - echo "Package version:""$PACKAGE_VERSION"
+    - python setup.py sdist bdist_wheel # Builds the package
+  artifacts:
+    paths:
+      - dist/*
+    expire_in: 1 day
+
+deploy:
+  stage: deploy
+  image: python:3.11
+  tags:
+    - docker
+  only:
+    - main # Only deploy from main branch
+  script:
+    - export PACKAGE_VERSION=$(python setup.py --version) # Extract version
+    - echo "Deploying version:""$PACKAGE_VERSION"
+    - twine upload --repository-url https://gitlab.inesctec.pt/api/v4/projects/5576/packages/pypi dist/*
