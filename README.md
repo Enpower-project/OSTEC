@@ -1,4 +1,4 @@
-![alt text](figures/logo_Enershare.png)
+
 ```
   _____   ______  _____    ____                            _    _                 _____   ______   _____  _______             _____  _____ 
  |  __ \ |  ____|/ ____|  / __ \                          | |  (_)               |  __ \ |  ____| / ____||__   __|     /\    |  __ \|_   _|
@@ -13,7 +13,7 @@
 # Documentation
 
 The *Community Market Pool* use case aims to provide **optimal local energy market (LEM) prices** for Renewable Energy
-Communities (REC) under the *Enershare* project. To this end, various mechanisms and algorithms are provided for
+Communities (REC) under the *ENPOWER* project. To this end, various mechanisms and algorithms are provided for
 calculating these prices. The optimality of the price arrays computed depends on the architecture of the REC, 
 the assets of its members and their energy supply contracts with their suppliers, but it is always measured 
 by its ability to promote internal transactions as opposed to buying or selling energy from traders.
