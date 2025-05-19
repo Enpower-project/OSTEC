@@ -1,10 +1,10 @@
 Copyright (C) [2023], INESC TEC 
 
-ENERSHARE – REC Operation Library: A Python library for computing local energy market (LEM) prices for a Renewable
+ENPOWER – REC Operation Library: A Python library for computing local energy market (LEM) prices for a Renewable
 Energy Community (REC) that can promote the minimization of the members’ operation cost with energy.
 
 This software is authored by:
-Ricardo Emanuel Gomes Fernandes da Silva
+INESC TEC
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
 License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
