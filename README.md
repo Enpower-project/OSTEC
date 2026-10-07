@@ -1,5 +1,9 @@
 # Documentation
 
+> **Note:** this branch (`hydrogen-integration`) extends the library with the **integration of hydrogen assets** 
+> (Power-to-Hydrogen with variable efficiency). It is based on an earlier version of the library, so 
+> ```bid_activation``` (available in `main`) is not included.
+
 The *Community Market Pool* use case aims to provide **optimal local energy market (LEM) prices** for Renewable Energy
 Communities (REC) under the *ENPOWER* project. To this end, various mechanisms and algorithms are provided for
 calculating these prices. The optimality of the price arrays computed depends on the architecture of the REC, 
@@ -26,8 +30,7 @@ presented with a variety of possibilites, namely:
 in the REC,
 - make a three-stage collective optimization that, on top of the previous stage, also determines the amount of 
 flexibility (from the flexible loads and BESS scheduled in the previous stages) that the REC is willing to provide 
-for a given flexibility price, enabling the computation of a REC-level bidding curve and the activation of a 
-previously submitted flexibility bid
+for a given flexibility price, enabling the computation of a REC-level bidding curve
 
 LEM prices can be computed through several pricing mechanisms and may require the computation of collective optimization 
 MILP. It is also important to define the timeframe for which the prices are being computed, since they can be used to 
@@ -89,7 +92,7 @@ constrained by comfort bounds on indoor and outlet water temperatures
 
 These flexible loads can be included in the individual and collective MILP formulations (both *pool* and *bilateral* 
 LEM structures), and a new three-stage collective *pool* MILP was also added, enabling the computation of bidding 
-curves and flexibility activation for a REC.
+curves for a REC.
 
 ## Main optimization functions overview
 Under ```rec_management_tools.optimization_functions``` the user can find:
@@ -119,10 +122,6 @@ this stage also determines the amount of flexibility the REC is willing to provi
 - similar to ```run_pre_three_stage_collective_pool_milp```, but runs the third stage multiple times for a range of 
 flexibility prices (from an initial to a final price, with a given increment), returning the resulting REC-level 
 bidding curve
-
-```bid_activation``` 
-- run the third stage for a previously submitted flexibility bid (given its flexibility price and the flexibility 
-amount to be activated), returning the corresponding schedules
 
 ```run_post_individual_cost``` 
 - run a post-delivery individual MILP, for a single REC member
