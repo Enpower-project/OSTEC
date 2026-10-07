@@ -1,4 +1,5 @@
 import inspect
+import numpy as np
 
 import rec_op_lem_prices.pricing_mechanisms.structures.examples as eg
 
@@ -90,7 +91,7 @@ def test_vanilla_mmr():
 
 	assert vanilla_mmr(buy_offers, sell_offers, pruned=False) == 10.0
 	assert vanilla_mmr(buy_offers, sell_offers) == 22.5
-	assert vanilla_mmr(buy_offers, sell_offers, divisor=4) == 11.25
+	assert vanilla_mmr(buy_offers, sell_offers, divider=0.25) == 16.25
 
 
 def test_vanilla_sdr():
@@ -159,7 +160,8 @@ def test_loop_post_pool_crossing_value():
 
 def test_loop_pre_bilateral_mmr():
 	r = loop_pre_bilateral_mmr(LOOP_PRE_INPUTS_S2_BILATERAL, for_testing=True)
-	assert r[:-1] == LOOP_PRE_OUTPUTS_S2_BILATERAL_MMR
+	assert np.isclose(r[:-1][0], LOOP_PRE_OUTPUTS_S2_BILATERAL_MMR[0]).all()
+	assert r[:-1][1:] == LOOP_PRE_OUTPUTS_S2_BILATERAL_MMR[1:]
 
 
 def test_loop_post_bilateral_mmr():

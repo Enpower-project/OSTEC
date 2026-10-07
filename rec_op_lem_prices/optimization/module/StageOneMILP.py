@@ -2,6 +2,7 @@
 Class for implementing and running the Stage 1 MILP for each individual Meter / microgrid / hybrid park.
 """
 import itertools
+import math
 import os
 import re
 
@@ -32,8 +33,9 @@ from pulp import (
 	LpVariable,
 	GUROBI_CMD,
 	pulp,
-	value
+	value, LpInteger
 )
+from math import exp
 
 
 class StageOneMILP:
@@ -80,8 +82,8 @@ class StageOneMILP:
 		self.meter_id = backpack.get('id')  # identification of the Meter for which te MILP will run
 		self.time_intervals = None  # for number of time intervals per horizon
 		self.time_series = None  # for a range of time intervals
-		self.set_btm_storage = []  # stores the Meter's Btm storage assets' ids
-		self.set_btm_evs = []  # stores the evs' ids
+		self.set_btm_storage = [] # stores the Meter's Btm storage assets' ids
+		self.set_btm_evs = [] # stores the evs' ids
 		# EWH
 		self._ewh_paramsInput = {}
 		self._ewh_dataset = {}
@@ -112,6 +114,22 @@ class StageOneMILP:
 			self._ewh = backpack.get('ewh') # NEW EW
 		except:
 			self._ewh = None
+		# HVAC
+		self._hvac = backpack.get('hvac')
+		self.mu = {}  # Building insulation factor
+		self.psi = {}  # HVAC temperature efficiency factor
+		self.hvac_temp_min = {}  # Min room temperature constraint
+		self.hvac_temp_max = {}  # Max room temperature constraint
+		self.hvac_init_temp = {}  # Initial room temperature
+		self.hvac_capacity = {}  # Maximum HVAC power
+		self.T_out = {} # Outside temperature
+		self.thermal_resist= {}
+		self.thermal_cap = {}
+		self.type= {}
+		self.set_hvac = []  # Set of active HVAC units
+		# HP
+		self._hp = backpack.get('hp')
+		self.set_hp = []
 
 
 	def __define_milp(self):
@@ -127,7 +145,7 @@ class StageOneMILP:
 		self.time_intervals = time_intervals(self._horizon, self._delta_t)
 		self.time_series = range(self.time_intervals)
 
-		# Unpack EVs information
+		#Unpack EVs information
 		if self._btm_ev is not None:
 			self.set_btm_evs = list(self._btm_ev.keys())
 		self._trip_ev = {ev: self._btm_ev[ev]['trip_ev'] for ev in self.set_btm_evs}
@@ -186,6 +204,45 @@ class StageOneMILP:
 			self.regressor_belowSet_m_delta = {e: varBackpack[e]['regressor_belowSet_m_delta'] for e in self.set_ewh}
 			self.regressor_belowSet_b = {e: varBackpack[e]['regressor_belowSet_b'] for e in self.set_ewh}
 
+		# Unpack HVAC information
+		if self._hvac is not None:
+			self.set_hvac = list(self._hvac.keys())
+			self.mu = {h: self._hvac[h]['mu'] for h in self.set_hvac}
+			self.psi = {h: self._hvac[h]['psi'] for h in self.set_hvac}
+			self.hvac_capacity = {h: self._hvac[h]['hvac_capacity'] for h in self.set_hvac}
+			self.hvac_temp_min = {h: self._hvac[h]['temp_min'] for h in self.set_hvac}
+			self.hvac_temp_max = {h: self._hvac[h]['temp_max'] for h in self.set_hvac}
+			self.hvac_init_temp = {h: self._hvac[h]['init_temp'] for h in self.set_hvac}
+			self.T_out = {h: self._hvac[h]['t_out'] for h in self.set_hvac}
+			self.thermal_resist= {h: self._hvac[h]['thermal_resist'] for h in self.set_hvac}
+			self.thermal_cap = {h: self._hvac[h]['thermal_cap'] for h in self.set_hvac}
+			self.type = {h: self._hvac[h]['type'] for h in self.set_hvac}
+
+		# Unpack HP information
+		if self._hp is not None:
+			self.set_hp = list(self._hp.keys())
+			self.hp_type = {h: self._hp[h]['type'] for h in self.set_hp}
+			self.hp_power_rated = {h: self._hp[h]['power_rated'] for h in self.set_hp}
+			self.hp_capacity_tank = {h: self._hp[h]['capacity_tank'] for h in self.set_hp}
+			self.hp_c_p = {h: self._hp[h]['c_p'] for h in self.set_hp}
+			self.hp_temp_inlet = {h: self._hp[h]['temp_inlet'] for h in self.set_hp}
+			self.hp_temp_desired = {h: self._hp[h]['temp_desired'] for h in self.set_hp}
+			self.hp_temp_out_init = {h: self._hp[h]['temp_out_init'] for h in self.set_hp}
+			self.hp_temp_indoor_init = {h: self._hp[h]['temp_indoor_init'] for h in self.set_hp}
+			self.hp_temp_indoor_final = {h: self._hp[h]['temp_indoor_final'] for h in self.set_hp}
+			self.hp_temp_indoor_min = {h: self._hp[h]['temp_indoor_min'] for h in self.set_hp}
+			self.hp_temp_indoor_max = {h: self._hp[h]['temp_indoor_max'] for h in self.set_hp}
+			self.hp_temp_out_min = {h: self._hp[h]['temp_out_min'] for h in self.set_hp}
+			self.hp_temp_out_max = {h: self._hp[h]['temp_out_max'] for h in self.set_hp}
+			self.hp_u_value = {h: self._hp[h]['u_value'] for h in self.set_hp}
+			self.hp_thermal_resistance = {h: self._hp[h]['thermal_resistance'] for h in self.set_hp}
+			self.hp_h_rad = {h: self._hp[h]['h_rad'] for h in self.set_hp}
+			self.hp_area_rad = {h: self._hp[h]['area_rad'] for h in self.set_hp}
+			self.hp_mass_hw_demand = {h: self._hp[h]['mass_hw_demand'] for h in self.set_hp}
+			self.hp_mass_radiator = {h: self._hp[h]['mass_radiator'] for h in self.set_hp}
+			self.hp_t_out = {h: self._hp[h]['t_out'] for h in self.set_hp}
+
+
 
 		# Initialize the decision variables
 		e_sup_retail = none_lists(self.time_intervals)  # energy supplied to n from its retailer [kWh]
@@ -216,7 +273,32 @@ class StageOneMILP:
 			binAux = dict_none_lists(self.time_intervals, self.set_ewh)
 			energyEWH = dict_none_lists(self.time_intervals, self.set_ewh)
 
+		# HVAC - Initialize decision variables
+		if self._hvac is not None:
+			self.hvac_temp = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_power = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.delta_hvac = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_active = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_aux = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_mode = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_cost_comfort = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_mode_heat = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_mode_off = dict_none_lists(self.time_intervals, self.set_hvac)
+			self.hvac_mode_cool = dict_none_lists(self.time_intervals, self.set_hvac)
 
+		# HP - Initialize decision variables
+		if self._hp is not None:
+			self.hp_temp_indoor = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_temp_outlet = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_power = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_active = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_cost_comfort = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_op_mode = dict_none_lists(self.time_intervals, self.set_hp)
+			self.heating_kwh = dict_none_lists(self.time_intervals, self.set_hp)
+			self.circulation_kw = dict_none_lists(self.time_intervals, self.set_hp)
+			self.tank_heating_kwh = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_temp_return = dict_none_lists(self.time_intervals, self.set_hp)
+			self.hp_lost_power = dict_none_lists(self.time_intervals, self.set_hp)
 
 		# Define the decision variables as puLP objets
 		for t in self.time_series:
@@ -263,6 +345,35 @@ class StageOneMILP:
 					# Pricing of that specific energy usage
 					energyEWH[e][t] = LpVariable(f'energyEWH_' + increment, lowBound=0)
 
+			if self._hvac is not None:
+				for h in self.set_hvac:
+					increment = f'{h}_t{t:03d}'
+					self.hvac_temp[h][t] = LpVariable(f'hvac_temp_' + increment, lowBound=0)
+					self.hvac_power[h][t] = LpVariable(f'hvac_power_' + increment, lowBound=0)
+					self.delta_hvac[h][t] = LpVariable(f'delta_hvac_' + increment, lowBound=0, upBound=5, cat=LpInteger)
+					self.hvac_active[h][t]= LpVariable(f'hvac_active_' + increment,lowBound=0, upBound=1, cat=LpBinary)
+					self.hvac_aux[h][t] = LpVariable(f'hvac_aux_' + increment, lowBound=0, upBound=1,cat=LpBinary)
+					self.hvac_mode[h][t] = LpVariable(f'hvac_mode_' + increment, lowBound=0, upBound=1, cat=LpBinary)
+					self.hvac_cost_comfort[h][t] = LpVariable(f'hvac_cost_comfort_' + increment, lowBound=0)
+					self.hvac_mode_heat[h][t] = LpVariable(f'hvac_mode_heat_' + increment, lowBound=0, upBound=1, cat=LpBinary)
+					self.hvac_mode_off[h][t] = LpVariable(f'hvac_mode_off_' + increment, lowBound=0, upBound=1, cat=LpBinary)
+					self.hvac_mode_cool[h][t] = LpVariable(f'hvac_mode_cool_' + increment, lowBound=0, upBound=1, cat=LpBinary)
+
+			if self._hp is not None:
+				for hp in self.set_hp:
+					increment = f'{hp}_t{t:03d}'
+
+					self.hp_temp_indoor[hp][t] = LpVariable(f'hp_temp_indoor_' + increment, lowBound=0)
+					self.hp_temp_outlet[hp][t] = LpVariable(f'hp_temp_outlet_' + increment, lowBound=0)
+					self.hp_power[hp][t] = LpVariable(f'power_hp_' + increment, lowBound=0)
+					self.hp_active[hp][t] = LpVariable(f'hp_active_' + increment, lowBound=0, upBound=1, cat=LpBinary)
+					self.hp_cost_comfort[hp][t] = LpVariable(f'hp_cost_comfort_' + increment, lowBound=0)
+					self.hp_active[hp][t] = LpVariable(f'hp_active_' + increment, cat=LpBinary)
+					self.heating_kwh[hp][t] = LpVariable(f'hp_power_heating_' + increment, lowBound=0)
+					self.circulation_kw[hp][t] = LpVariable(f'hp_power_circulation_' + increment, lowBound=0)
+					self.tank_heating_kwh[hp][t] = LpVariable(f'hp_power_tank_' + increment, lowBound=0)
+					self.hp_temp_return[hp][t] = LpVariable(f'hp_temp_return_' + increment, lowBound=0)
+					self.hp_lost_power[hp][t] = LpVariable(f'hp_lost_power_' + increment, lowBound=0)
 
 		# Eq. 1: Objective Function
 		objective = lpSum(
@@ -275,6 +386,13 @@ class StageOneMILP:
 			+ lpSum(costComfort[e][t] * 100 for e in self.set_ewh)
 			for t in self.time_series
 		)
+
+		for t in self.time_series:
+			if t != 0:
+				objective += lpSum(self.hvac_cost_comfort[h][t] * 100 for h in self.set_hvac) + lpSum(self.hp_cost_comfort[hp][t] * 1 for hp in self.set_hp)
+
+
+
 
 		self.milp += objective, 'Objective Function'
 
@@ -294,7 +412,9 @@ class StageOneMILP:
 				+ lpSum(e_bc[b][t] - e_bd[b][t] for b in self.set_btm_storage) + \
 				+ lpSum(p_ev_charge[ev][t] - p_ev_discharge[ev][t]
 				 for ev in self.set_btm_evs) + \
-				lpSum(- varBackpack[e]['original_load'][t] + energyEWH[e][t] for e in self.set_ewh) ,\
+				lpSum(- varBackpack[e]['original_load'][t] + energyEWH[e][t] for e in self.set_ewh) + \
+				lpSum(self.hvac_power[h][t] * self._delta_t for h in self.set_hvac) + \
+				lpSum(self.hp_power[h][t] for h in self.set_hp), \
 				'C_met_' + increment
 
 			# Eq. 4
@@ -484,8 +604,239 @@ class StageOneMILP:
 								 self.delta_t[e] * 60, \
 						f'Constraint_8.7_{e}_{t:07d}'
 
+		# HVAC Constraints
+		if self._hvac is not None:
+			for h, t in itertools.product(self.set_hvac, self.time_series):
+				increment = f'{h}_{t:03d}'
+
+				# Temperature Evolution Equation
+				if t == 0:
+					self.milp += self.hvac_temp[h][t] == self.hvac_init_temp[h], f'HVAC_Start_Temp_' + increment
+
+				if self.type[h] == 'inverter':
+					if t !=0:
+						#Heating equation
+						self.milp += (
+								self.hvac_temp[h][t]
+								- self.hvac_temp[h][t - 1]
+								- self.mu[h] * (self.T_out[h][t] - self.hvac_temp[h][t - 1])
+								- self.psi[h] * self.hvac_power[h][t] * self._delta_t
+								<= self._big_m * (1 - self.hvac_mode[h][t])
+						), f'HVAC_Heating_UB_' + increment
+						self.milp += (
+								self.hvac_temp[h][t]
+								- self.hvac_temp[h][t - 1]
+								- self.mu[h] * (self.T_out[h][t] - self.hvac_temp[h][t - 1])
+								- self.psi[h] * self.hvac_power[h][t] * self._delta_t
+								>= -self._big_m * (1 - self.hvac_mode[h][t])
+						), f'HVAC_Heating_LB_' + increment
+
+						# Cooling equation
+						self.milp += (
+								self.hvac_temp[h][t]
+								- self.hvac_temp[h][t - 1]
+								- self.mu[h] * (self.T_out[h][t] - self.hvac_temp[h][t - 1])
+								+ self.psi[h] * self.hvac_power[h][t] * self._delta_t
+								<= self._big_m * self.hvac_mode[h][t]
+						), f'HVAC_Cooling_UB_' + increment
+						self.milp += (
+								self.hvac_temp[h][t]
+								- self.hvac_temp[h][t - 1]
+								- self.mu[h] * (self.T_out[h][t] - self.hvac_temp[h][t - 1])
+								+ self.psi[h] * self.hvac_power[h][t] * self._delta_t
+								>= -self._big_m * self.hvac_mode[h][t]
+						), f'HVAC_Cooling_LB_' + increment
+					self.milp += self.delta_hvac[h][t] <= 5, f'HVAC_Activation_Control_' + increment
+					self.milp += self.hvac_power[h][t] == 0.2 * self.delta_hvac[h][t] * self.hvac_capacity[h], f'HVAC_Power_Level_' + increment
+
+				if self.type[h] == 'state':
+					if t !=0:
+						if t != 0:
+							self.milp += (self.hvac_mode_heat[h][t] + self.hvac_mode_off[h][t] + self.hvac_mode_cool[h][
+								t] == 1), f'HVAC_mode_sum_' + increment
+							# Heating mode
+							self.milp += (self.hvac_temp[h][t] <= (
+									self.T_out[h][t] + self.hvac_power[h][t] * self.thermal_resist[h] - (
+									self.T_out[h][t] + self.hvac_power[h][t] * self.thermal_resist[h] -
+									self.hvac_temp[h][t - 1]) * math.exp(
+								- self._delta_t / (self.thermal_resist[h] * self.thermal_cap[h])))
+										  + self._big_m * (1 - self.hvac_mode_heat[h][
+										t])), f'HVAC_Heating_UB_state' + increment
+							self.milp += (self.hvac_temp[h][t] >= (
+									self.T_out[h][t] + self.hvac_power[h][t] * self.thermal_resist[h] - (
+									self.T_out[h][t] + self.hvac_power[h][t] * self.thermal_resist[h] -
+									self.hvac_temp[h][t - 1]) * math.exp(
+								- self._delta_t / (self.thermal_resist[h] * self.thermal_cap[h])))
+										  - self._big_m * (1 - self.hvac_mode_heat[h][
+										t])), f'HVAC_Heating_LB_state' + increment
+
+							# off mode
+							self.milp += (self.hvac_temp[h][t] <= (
+									self.T_out[h][t] - (
+									self.T_out[h][t] -
+									self.hvac_temp[h][t - 1]) * math.exp(
+								- self._delta_t / (self.thermal_resist[h] * self.thermal_cap[h])))
+										  + self._big_m * (
+													  1 - self.hvac_mode_off[h][t])), f'HVAC_Off_UB_state' + increment
+							self.milp += (self.hvac_temp[h][t] >= (
+									self.T_out[h][t] - (
+									self.T_out[h][t] -
+									self.hvac_temp[h][t - 1]) * math.exp(
+								- self._delta_t / (self.thermal_resist[h] * self.thermal_cap[h])))
+										  - self._big_m * (
+													  1 - self.hvac_mode_off[h][t])), f'HVAC_Off_LB_state' + increment
+
+							# Cooling mode
+							self.milp += (self.hvac_temp[h][t] <= (
+									self.T_out[h][t] - self.hvac_power[h][t] * self.thermal_resist[h] - (
+									self.T_out[h][t] - self.hvac_power[h][t] * self.thermal_resist[h] -
+									self.hvac_temp[h][t - 1]) * math.exp(
+								- self._delta_t / (self.thermal_resist[h] * self.thermal_cap[h])))
+										  + self._big_m * (1 - self.hvac_mode_cool[h][
+										t])), f'HVAC_Cooling_UB_state' + increment
+							self.milp += (self.hvac_temp[h][t] >= (
+									self.T_out[h][t] - self.hvac_power[h][t] * self.thermal_resist[h] - (
+									self.T_out[h][t] - self.hvac_power[h][t] * self.thermal_resist[h] -
+									self.hvac_temp[h][t - 1]) * math.exp(
+								- self._delta_t / (self.thermal_resist[h] * self.thermal_cap[h])))
+										  - self._big_m * (1 - self.hvac_mode_cool[h][
+										t])), f'HVAC_Cooling_LB_state' + increment
+
+						self.milp += self.hvac_active[h][t] == self.hvac_mode_heat[h][t] + self.hvac_mode_cool[h][
+							t], f'HVAC_Active_Link_' + increment
+						self.milp += self.hvac_power[h][t] == self.hvac_active[h][t] * self.hvac_capacity[
+							h], f'HVAC_On_Off_' + increment
+
+				self.milp += self.hvac_temp[h][t] - self.hvac_temp_max[h] <= self.hvac_cost_comfort[h][t]
+				self.milp += self.hvac_temp[h][t] - self.hvac_temp_min[h] >= -self.hvac_cost_comfort[h][t]
+
+		if self._hp is not None:
+			for hp, t in itertools.product(self.set_hp, self.time_series):
+				if self.hp_type[hp] =='thermostat':
+
+					increment = f'{hp}_{t:03d}'
 
 
+					# HPT-1: HP energy consumed = rated_power * active[t] * delta_t
+					self.milp += (self.hp_power[hp][t] == self.hp_power_rated[hp] * self.hp_active[hp][t] * self._delta_t), f'HP_Energy_' + increment
+
+					# HPT-2.1
+					self.milp += (self.hp_power_rated[hp] * self.hp_active[hp][t] == self.heating_kwh[hp][t] + self.circulation_kw[hp][t] + self.tank_heating_kwh[hp][t] + self.hp_lost_power[hp][t]), f'HP_Total_Power_' + increment
+
+					# HPT-2.2
+					self.milp += (self.heating_kwh[hp][t] >= self.hp_mass_hw_demand[hp][t] * self.hp_c_p[hp] * (self.hp_temp_desired[hp] - self.hp_temp_inlet[hp]) * self._delta_t/3600), f'HP_Heating_Demand_' + increment
+
+					# HPT-2.3
+					self.milp += (self.circulation_kw[hp][t] >= self.hp_mass_radiator[hp][t] * self.hp_c_p[hp] * (self.hp_temp_outlet[hp][t] - self.hp_temp_return[hp][t]) * self._delta_t/3600), f'HP_Circulation_Power_' + increment
+
+					# HPT-2.5
+					# if t ==0:
+					# 	self.milp += (self.tank_heating_kwh[hp][t] == self.hp_capacity_tank[hp] * self.hp_c_p[hp] * self.hp_temp_out_init[hp]), f'HP_Tank_Init_' + increment
+					if t != 0:
+						# HPT-2.4
+						self.milp += (self.tank_heating_kwh[hp][t] >= self.hp_capacity_tank[hp] * self.hp_c_p[hp] * (
+									self.hp_temp_outlet[hp][t] - self.hp_temp_outlet[hp][t-1]) * self._delta_t/3600), f'HPT2.4_Tank_Heating_' + increment
+
+					# HPT-3
+					# self.milp += self.circulation_kw[hp][t] == ((self.hp_h_rad[hp] * self.hp_area_rad[hp]) * ((self.hp_temp_outlet[hp][t]
+					# 										+ self.hp_temp_return[hp][t])/2 - self.hp_temp_indoor[hp][t])), f'HP_Convective_Limit_' + increment
+
+					self.milp += (self.hp_mass_radiator[hp][t] * self.hp_c_p[hp] * (
+								self.hp_temp_outlet[hp][t] - self.hp_temp_return[hp][t]) * self._delta_t / 3600) == ((self.hp_h_rad[hp] * self.hp_area_rad[hp]) * ((self.hp_temp_outlet[hp][t]
+															+ self.hp_temp_return[hp][t])/2 - self.hp_temp_indoor[hp][t])* self._delta_t / 3600), f'HP_Convective_Limit_' + increment
+
+					# if t != 0:
+					# 	# Radiator‐loop mixing: the tank at t is the remaining hot water plus the colder radiator return
+					# 	self.milp += (self.hp_temp_outlet[hp][t] * self.hp_capacity_tank[hp]
+					# 						== self.hp_temp_outlet[hp][t - 1] * (self.hp_capacity_tank[hp] - self.hp_mass_radiator[hp][t])
+					# 						+ self.hp_temp_return[hp][t] * self.hp_mass_radiator[hp][t] ), f'HP_Radiator_Mixing_{hp}_{t}'
+
+
+					# HPT-4.1/ 4.2: Indoor temperature evolution
+					if t == 0:
+						self.milp += (self.hp_temp_indoor[hp][t] == self.hp_temp_indoor_init[hp]), f'HP_Indoor_Init_' + increment
+						self.milp += (self.hp_temp_outlet[hp][t] == self.hp_temp_out_init[hp]), f'HP_Outlet_Init_' + increment
+					else:
+						# self.milp += ( self.hp_temp_indoor[h][t] == self.hp_temp_indoor[h][t - 1]
+						# 					+ (self._delta_t / self.hp_thermal_resistance[h]) * self.hp_u_value[h] * (self.hp_t_out[h][t - 1] - self.hp_temp_indoor[h][t - 1])
+						# 					+ self.hp_h_rad[h] * self.hp_area_rad[h] * (self.hp_temp_outlet[h][t - 1] - self.hp_temp_indoor[h][t - 1])
+						# 			 ), f'HP_Indoor_Evolution_' + increment
+
+						self.milp += (self.hp_temp_indoor[hp][t] == self.hp_temp_indoor[hp][t - 1] * self.hp_u_value[hp] + self.hp_t_out[hp][t - 1] * (self._delta_t / self.hp_thermal_resistance[hp])
+									  + self.hp_h_rad[hp] * self.hp_area_rad[hp] * self.hp_temp_outlet[hp][t]), f'HP_Indoor_Evolution_' + increment
+
+
+					# HPT-5
+					self.milp += (self.hp_temp_indoor[hp][t] + self.hp_cost_comfort[hp][t] >= self.hp_temp_indoor_min[hp]), f'HP_Temp_Min_WithSlack_' + increment
+					self.milp += (self.hp_temp_indoor[hp][t] + self.hp_cost_comfort[hp][t] <= self.hp_temp_indoor_max[hp]), f'HP_Temp_Max_WithSlack_' + increment
+					# HPT-5
+					self.milp += (self.hp_temp_outlet[hp][t] + self.hp_cost_comfort[hp][t] >= self.hp_temp_out_min[hp]), f'HP_TempOut_Min_WithSlack_' + increment
+					self.milp += (self.hp_temp_outlet[hp][t] + self.hp_cost_comfort[hp][t] <= self.hp_temp_out_max[hp]), f'HP_TempOut_Max_WithSlack_' + increment
+
+				if self.hp_type[hp] == 'inverter':
+
+					increment = f'{hp}_{t:03d}'
+
+					self.milp += self.hp_power[hp][t] <= self.hp_power_rated[hp]
+
+					# HPT-2.1
+					self.milp += (self.hp_power[hp][t] >= self.heating_kwh[hp][t] +
+								self.circulation_kw[hp][t] + self.tank_heating_kwh[hp][t]), f'HP_Total_Power_' + increment
+
+					# HPT-2.2
+					self.milp += (self.heating_kwh[hp][t] >= self.hp_mass_hw_demand[hp][t] * self.hp_c_p[hp] * (
+								self.hp_temp_desired[hp] - self.hp_temp_inlet[
+							hp])/ 3600 * self._delta_t), f'HP_Heating_Demand_' + increment
+
+					# HPT-2.3
+					self.milp += (self.circulation_kw[hp][t] >= self.hp_mass_radiator[hp][t] * self.hp_c_p[hp] * (
+								self.hp_temp_outlet[hp][t] - self.hp_temp_return[hp][
+							t])/ 3600 * self._delta_t), f'HP_Circulation_Power_' + increment
+
+					# HPT-2.5
+					# if t ==0:
+					# 	self.milp += (self.tank_heating_kwh[hp][t] == self.hp_capacity_tank[hp] * self.hp_c_p[hp] * self.hp_temp_out_init[hp]/3600), f'HP_Tank_Init_' + increment
+					if t != 0:
+						# HPT-2.4
+						self.milp += (self.tank_heating_kwh[hp][t] >= self.hp_capacity_tank[hp] * self.hp_c_p[hp] * (
+								self.hp_temp_outlet[hp][t] - self.hp_temp_outlet[hp][
+							t - 1])/ 3600 * self._delta_t), f'HPT2.4_Tank_Heating_' + increment
+
+					# HPT-3
+					# self.milp += self.circulation_kw[hp][t] == ((self.hp_h_rad[hp] * self.hp_area_rad[hp]) * ((self.hp_temp_outlet[hp][t]
+					# 										+ self.hp_temp_return[hp][t])/2 - self.hp_temp_indoor[hp][t])), f'HP_Convective_Limit_' + increment
+
+					self.milp += (self.hp_mass_radiator[hp][t] * self.hp_c_p[hp] * (
+							self.hp_temp_outlet[hp][t] - self.hp_temp_return[hp][t]) / 3600) == (
+											(self.hp_h_rad[hp] * self.hp_area_rad[hp]) * ((self.hp_temp_outlet[hp][t]
+											+ self.hp_temp_return[hp][t]) / 2 - self.hp_temp_indoor[hp][t]) * self._delta_t), f'HP_Convective_Limit_' + increment
+
+
+					# HPT-4.1/ 4.2: Indoor temperature evolution
+					if t == 0:
+						self.milp += (self.hp_temp_indoor[hp][t] == self.hp_temp_indoor_init[hp]), f'HP_Indoor_Init_' + increment
+						self.milp += (self.hp_temp_outlet[hp][t] == self.hp_temp_out_init[hp]), f'HP_Outlet_Init_' + increment
+					else:
+						# self.milp += ( self.hp_temp_indoor[h][t] == self.hp_temp_indoor[h][t - 1]
+						# 					+ (self._delta_t / self.hp_thermal_resistance[h]) * self.hp_u_value[h] * (self.hp_t_out[h][t - 1] - self.hp_temp_indoor[h][t - 1])
+						# 					+ self.hp_h_rad[h] * self.hp_area_rad[h] * (self.hp_temp_outlet[h][t - 1] - self.hp_temp_indoor[h][t - 1])
+						# 			 ), f'HP_Indoor_Evolution_' + increment
+
+						self.milp += (self.hp_temp_indoor[hp][t] == self.hp_temp_indoor[hp][t - 1] * self.hp_u_value[hp] +
+									  self.hp_t_out[hp][t - 1] * (self._delta_t / self.hp_thermal_resistance[hp])
+									  + self.hp_h_rad[hp] * self.hp_area_rad[hp] * self.hp_temp_outlet[hp][
+										  t]), f'HP_Indoor_Evolution_' + increment
+
+					# HPT-5
+					self.milp += (self.hp_temp_indoor[hp][t] + self.hp_cost_comfort[hp][t] >= self.hp_temp_indoor_min[
+						hp]), f'HP_Temp_Min_WithSlack_' + increment
+					self.milp += (self.hp_temp_indoor[hp][t] + self.hp_cost_comfort[hp][t] <= self.hp_temp_indoor_max[
+						hp]), f'HP_Temp_Max_WithSlack_' + increment
+					# HPT-5
+					# self.milp += (self.hp_temp_outlet[hp][t] + self.hp_cost_comfort[hp][t] >= self.hp_temp_out_min[
+					# 	hp]), f'HP_TempOut_Min_WithSlack_' + increment
+					# self.milp += (self.hp_temp_outlet[hp][t] + self.hp_cost_comfort[hp][t] <= self.hp_temp_out_max[
+					# 	hp]), f'HP_TempOut_Max_WithSlack_' + increment
 
 		# Write MILP to .lp file
 		dir_name = os.path.abspath(os.path.join(__file__, '..'))
@@ -497,7 +848,7 @@ class StageOneMILP:
 			self.milp.setSolver(pulp.PULP_CBC_CMD(msg=False, timeLimit=self.timeout, gapRel=self.mipgap))
 
 		elif self.solver == 'GUROBI' and 'GUROBI_CMD' in listSolvers(onlyAvailable=True):
-			self.milp.setSolver(GUROBI_CMD(msg=False, timeLimit=self.timeout, mip=self.mipgap))
+			self.milp.setSolver(GUROBI_CMD(msg=False, timeLimit=self.timeout, options=[("MIPGap", self.mipgap)]))
 
 		elif self.solver == 'CPLEX' and 'CPLEX_CMD' in listSolvers(onlyAvailable=True):
 			self.milp.setSolver(CPLEX_CMD(msg=False, timeLimit=self.timeout, gapRel=self.mipgap))
@@ -649,6 +1000,63 @@ class StageOneMILP:
 						outputs['ewh_optimized_load'][e][step_nr] = v.varValue * varBackpack[e]['ewh_power']
 					outputs['ewh_original_load'][e] = varBackpack[e]['original_load']
 					outputs['ewh_delta_use'][e] = varBackpack[e]['delta_use']
+
+
+		# HVAC Outputs
+		if self._hvac is not None:
+
+			outputs['hvac_temp'] = dict_none_lists(self.time_intervals, self.set_hvac)
+			outputs['hvac_power'] = dict_none_lists(self.time_intervals, self.set_hvac)
+			outputs['cost_comfort'] = dict_none_lists(self.time_intervals, self.set_hvac)
+
+			for v in self.milp.variables():
+				step_nr = None
+				if not re.search('dummy', v.name):
+					step_nr = int(v.name[-3:])
+
+				for h in self.set_hvac:
+					# Find variables and store data
+					if re.search(f'hvac_temp_{h}_', v.name):
+						outputs['hvac_temp'][h][step_nr] = v.varValue
+					if re.search(f'hvac_power_{h}_', v.name):
+						outputs['hvac_power'][h][step_nr] = v.varValue
+					if re.search(f'hvac_cost_comfort_{h}_', v.name):
+						outputs['cost_comfort'][h][step_nr] = v.varValue
+
+		if self._hp is not None:
+
+			outputs['hp_indoor_temp'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_outlet_temp'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_power'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_cost_comfort'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_power_heating'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_power_circulation'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_power_tank'] = dict_none_lists(self.time_intervals, self.set_hp)
+			outputs['hp_temp_return'] = dict_none_lists(self.time_intervals, self.set_hp)
+
+			for v in self.milp.variables():
+				step_nr = None
+				if not re.search('dummy', v.name):
+					step_nr = int(v.name[-3:])
+
+				for h in self.set_hp:
+					# Find variables and store data
+					if re.search(f'hp_temp_indoor_{h}_', v.name):
+						outputs['hp_indoor_temp'][h][step_nr] = v.varValue
+					if re.search(f'hp_temp_outlet_{h}_', v.name):
+						outputs['hp_outlet_temp'][h][step_nr] = v.varValue
+					if re.search(f'power_hp_{h}_', v.name):
+						outputs['hp_power'][h][step_nr] = v.varValue
+					if re.search(f'hp_cost_comfort_{h}_', v.name):
+						outputs['hp_cost_comfort'][h][step_nr] = v.varValue
+					if re.search(f'hp_power_heating_{h}_', v.name):
+						outputs['hp_power_heating'][h][step_nr] = v.varValue
+					if re.search(f'hp_power_circulation_{h}_', v.name):
+						outputs['hp_power_circulation'][h][step_nr] = v.varValue
+					if re.search(f'hp_power_tank_{h}_', v.name):
+						outputs['hp_power_tank'][h][step_nr] = v.varValue
+					if re.search(f'hp_temp_return_{h}_', v.name):
+						outputs['hp_temp_return'][h][step_nr] = v.varValue
 
 		# Calculate the cost of degradation
 		deg_cost = 0

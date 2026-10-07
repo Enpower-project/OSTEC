@@ -38,8 +38,8 @@ def test_compute_mmr():
 	l_p2p = compute_mmr(buy_offers, sell_offers)
 	assert l_p2p == 25.0  # assert the mmr is returned when buying and selling offers are made
 
-	l_p2p = compute_mmr(buy_offers, sell_offers, divisor=3)
-	assert round(l_p2p, 2) == 16.67  # assert the imr is returned when buying and selling offers are made
+	l_p2p = compute_mmr(buy_offers, sell_offers, divider=1/3)
+	assert round(l_p2p, 2) == 21.67  # assert the imr is returned when buying and selling offers are made
 
 	cross_l_p2p = compute_mmr(buy_offers, sell_offers_cross)
 	assert cross_l_p2p == 10.0  # assert the pool's cross value is return when offers cross
@@ -68,8 +68,8 @@ def test_compute_pruned_mmr():
 	l_p2p = compute_pruned_mmr(buy_offers, sell_offers)
 	assert l_p2p == 25.0  # assert the mmr is returned when buying and selling offers are made
 
-	l_p2p = compute_mmr(buy_offers, sell_offers, divisor=3)
-	assert round(l_p2p, 2) == 16.67  # assert the imr is returned when buying and selling offers are made
+	l_p2p = compute_mmr(buy_offers, sell_offers, divider=1/3)
+	assert round(l_p2p, 2) == 21.67  # assert the imr is returned when buying and selling offers are made
 
 	cross_l_p2p = compute_pruned_mmr(buy_offers, sell_offers_cross)
 	assert cross_l_p2p == 22.5  # assert the pool's cross value is return when offers cross
@@ -289,13 +289,13 @@ def test_compute_pruned_sdr_plus():
 
 
 if __name__ == '__main__':
-	# test_compute_mmr()
-	# test_compute_pruned_mmr()
-	# test_compute_pruned_sdr()
-	# test_compute_sdr()
-	# test_do_offers_cross()
-	# test_get_accepted_offers()
-	# test_compute_crossing_value()
-	# test_stop_criterion()
+	test_compute_mmr()
+	test_compute_pruned_mmr()
+	test_compute_pruned_sdr()
+	test_compute_sdr()
+	test_do_offers_cross()
+	test_get_accepted_offers()
+	test_compute_crossing_value()
+	test_stop_criterion()
 	test_compute_pruned_mmr_plus()
 	test_compute_pruned_sdr_plus()
