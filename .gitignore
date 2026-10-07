@@ -119,5 +119,10 @@ dmypy.json
 .pyre/
 .idea
 
+# devtests
+rec_op_lem_prices/devtests
+
+test_function.py
+
 # Other specific files
 rec_op_lem_prices/optimization/module/*.lp

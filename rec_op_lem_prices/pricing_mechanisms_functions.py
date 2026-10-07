@@ -33,9 +33,14 @@ from rec_op_lem_prices.custom_types.stage_two_milp_pool_types import (
 	LoopPreBackpackS2PoolDict,
 	OutputsS2PoolDict
 )
+
 from loguru import logger
+from pulp import listSolvers
 from typing import Callable, Union
 from typing_extensions import Unpack
+
+
+IS_CPLEX_AVAILABLE = "CPLEX_CMD" in listSolvers(onlyAvailable=True)
 
 
 # -- AUXILIARY FUNCTIONS -----------------------------------------------------------------------------------------------
@@ -223,7 +228,7 @@ def vanilla_crossing_value_plus(buys: OffersList,
 
 
 # -- DUALS -------------------------------------------------------------------------------------------------------------
-def dual_pre_pool(backpack: LoopPreBackpackS2PoolDict) -> (list[float], OutputsS2PoolDict):
+def dual_pre_pool(backpack: LoopPreBackpackS2PoolDict, solver='CBC') -> (list[float], OutputsS2PoolDict):
 	"""
 	Function to compute the LEM prices' array from the market equilibrium constraint shadow values.
 	A standalone collective MILP is run, where the costs with energy for the whole REC are computed,
@@ -274,10 +279,18 @@ def dual_pre_pool(backpack: LoopPreBackpackS2PoolDict) -> (list[float], OutputsS
 			or not; this means that if a meter has surplus and it is injecting in the grid, that surplus must totally
 			shared with all members of the REC
 	}
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: array of float with the LEM prices computed, plus the full MILP outputs' structure;
 		the order of the values in the array follows the same order of the provided data
 	"""
 	logger.info('Running a pre-delivery standalone pool MILP to retrieve dual LEM prices...')
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
 
 	# Set values for specific run
 	ti = time_intervals(backpack['horizon'], backpack['delta_t'])
@@ -286,7 +299,7 @@ def dual_pre_pool(backpack: LoopPreBackpackS2PoolDict) -> (list[float], OutputsS
 	for _, val in backpack['meters'].items():
 		val['c_ind'] = 0.0
 
-	milp = StageTwoMILPPool(backpack)
+	milp = StageTwoMILPPool(backpack, solver=valid_solver)
 	milp.solve_milp()
 	results = milp.generate_outputs()
 	dual_prices = results['dual_prices']
@@ -296,7 +309,7 @@ def dual_pre_pool(backpack: LoopPreBackpackS2PoolDict) -> (list[float], OutputsS
 	return dual_prices, results
 
 
-def dual_post_pool(backpack: LoopPostBackpackS2PoolDict) -> (list[float], OutputsS2PoolDict):
+def dual_post_pool(backpack: LoopPostBackpackS2PoolDict, solver='CBC') -> (list[float], OutputsS2PoolDict):
 	"""
 	Function to compute the LEM prices' array from the market equilibrium constraint shadow values.
 	A standalone collective MILP is run, where the costs with energy for the whole REC are computed,
@@ -333,10 +346,18 @@ def dual_post_pool(backpack: LoopPostBackpackS2PoolDict) -> (list[float], Output
 			or not; this means that if a meter has surplus and it is injecting in the grid, that surplus must totally
 			shared with all members of the REC
 	}
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: array of float with the LEM prices computed, plus the full MILP outputs' structure;
 		the order of the values in the array follows the same order of the provided data
 	"""
 	logger.info('Running a post-delivery standalone pool MILP to retrieve dual LEM prices...')
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
 
 	# Set values for specific run
 	ti = time_intervals(backpack['horizon'], backpack['delta_t'])
@@ -346,7 +367,7 @@ def dual_post_pool(backpack: LoopPostBackpackS2PoolDict) -> (list[float], Output
 		val['c_ind'] = 0.0
 		val['btm_storage'] = {}
 
-	milp = StageTwoMILPPool(backpack)
+	milp = StageTwoMILPPool(backpack, solver=valid_solver)
 	milp.solve_milp()
 	results = milp.generate_outputs()
 	dual_prices = results['dual_prices']
@@ -361,6 +382,7 @@ def _common_loop(backpack: LoopPreBackpackS2PoolDict,
                  pricing_func: Callable,
                  optimization_func: Callable,
                  for_testing: False,
+				 solver: str,
                  **kwargs: Unpack[RequestParams]) \
 		-> (
 				list[float],
@@ -374,6 +396,7 @@ def _common_loop(backpack: LoopPreBackpackS2PoolDict,
 	:param pricing_func: market mechanism function to be applied
 	:param optimization_func: optimization function to be applied
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:param kwargs: necessary flags or numeric parameters that are required by the passed func
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
@@ -409,6 +432,7 @@ def _common_loop(backpack: LoopPreBackpackS2PoolDict,
 	best_l_lem = l_lem.copy()
 	criterion = None
 	break_while = False  # used when Euclidean distance criterion is met, to break out of inner loop
+	milp_results = None  # Initialize the MILP results
 	best_milp_results = None
 
 	# Print the initial prices considered
@@ -475,7 +499,7 @@ def _common_loop(backpack: LoopPreBackpackS2PoolDict,
 
 		# Run the optimization algorithm
 		logger.info(f'Solving MILP...')
-		milp_results = optimization_func(backpack, for_testing)
+		milp_results = optimization_func(backpack, for_testing, solver)
 
 		# Retrieve the new e_met and update "meters" structure
 		for meter_name, meter_data in milp_results[0]['e_cmet'].items():
@@ -498,7 +522,8 @@ def _common_loop(backpack: LoopPreBackpackS2PoolDict,
 def loop_pre_pool_mmr(backpack: LoopPreBackpackS2PoolDict,
                       for_testing=False,
                       pruned=True,
-                      divisor=2.0) \
+                      divisor=2.0,
+					  solver='CBC') \
 		-> (
 				list[float],
 				Union[float, None],
@@ -565,6 +590,7 @@ def loop_pre_pool_mmr(backpack: LoopPreBackpackS2PoolDict,
 	and the most valuable selling offer; By default, the value is 2.0, making the price equidistant from both offers;
 	Higher values skew the price towards the selling offers and smaller values towards the buying offers.
 	Note: must be non-negative and > 0.0
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
 			i.e. the iteration with the best objective function value;
@@ -578,17 +604,27 @@ def loop_pre_pool_mmr(backpack: LoopPreBackpackS2PoolDict,
 	assert 0.0 <= divisor, 'Please provide a divisor value greater than or equal to 0.0.'
 	pricing_func = compute_pruned_mmr if pruned else compute_mmr
 	opt_func = run_pre_two_stage_collective_pool_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_loop(backpack,
 	                    pricing_func,
 	                    opt_func,
 	                    for_testing,
-	                    divisor=divisor)
+	                    divisor=divisor,
+						solver=valid_solver)
 
 
 def loop_pre_pool_sdr(backpack: LoopPreBackpackS2PoolDict,
                       for_testing=False,
                       pruned=True,
-                      compensation=0.0) \
+                      compensation=0.0,
+					  solver='CBC') \
 		-> (
 				list[float],
 				Union[float, None],
@@ -652,6 +688,7 @@ def loop_pre_pool_sdr(backpack: LoopPreBackpackS2PoolDict,
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param pruned: if True, consider only offers that would be cleared on a market pool
 	:param compensation: float between 0 and 1 that establishes the relative compensation
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
 			i.e. the iteration with the best objective function value;
@@ -665,16 +702,26 @@ def loop_pre_pool_sdr(backpack: LoopPreBackpackS2PoolDict,
 	assert 0.0 <= compensation <= 1.0, 'Please provide a compensation value between 0.0 and 1.0.'
 	pricing_func = compute_pruned_sdr if pruned else compute_sdr
 	opt_func = run_pre_two_stage_collective_pool_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_loop(backpack,
 	                    pricing_func,
 	                    opt_func,
 	                    for_testing,
-	                    compensation=compensation)
+	                    compensation=compensation,
+						solver=valid_solver)
 
 
 def loop_pre_pool_crossing_value(backpack: LoopPreBackpackS2PoolDict,
                                  for_testing=False,
-                                 small_increment=0.0) \
+                                 small_increment=0.0,
+								 solver='CBC') \
 		-> (
 				list[float],
 				Union[float, None],
@@ -737,6 +784,7 @@ def loop_pre_pool_crossing_value(backpack: LoopPreBackpackS2PoolDict,
 	}
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param small_increment: float to add to buy offers' value and subtract from sell offers' value
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
 			i.e. the iteration with the best objective function value;
@@ -749,17 +797,27 @@ def loop_pre_pool_crossing_value(backpack: LoopPreBackpackS2PoolDict,
 	"""
 	pricing_func = compute_crossing_value
 	opt_func = run_pre_two_stage_collective_pool_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_loop(backpack,
 	                    pricing_func,
 	                    opt_func,
 	                    for_testing,
-	                    small_increment=small_increment)
+	                    small_increment=small_increment,
+						solver=valid_solver)
 
 
 def loop_pre_bilateral_mmr(backpack: LoopPreBackpackS2BilateralDict,
                            for_testing=False,
                            pruned=True,
-                           divisor=2.0) \
+                           divisor=2.0,
+						   solver='CBC') \
 		-> (
 				list[float],
 				Union[float, None],
@@ -827,6 +885,7 @@ def loop_pre_bilateral_mmr(backpack: LoopPreBackpackS2BilateralDict,
 	and the most valuable selling offer; By default, the value is 2.0, making the price equidistant from both offers;
 	Higher values skew the price towards the selling offers and smaller values towards the buying offers.
 	Note: must be non-negative and > 0.0
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
 			i.e. the iteration with the best objective function value;
@@ -840,17 +899,27 @@ def loop_pre_bilateral_mmr(backpack: LoopPreBackpackS2BilateralDict,
 	assert 0.0 <= divisor, 'Please provide a divisor value greater than or equal to 0.0.'
 	pricing_func = compute_pruned_mmr if pruned else compute_mmr
 	opt_func = run_pre_two_stage_collective_bilateral_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_loop(backpack,
 	                    pricing_func,
 	                    opt_func,
 	                    for_testing,
-	                    divisor=divisor)
+	                    divisor=divisor,
+						solver=valid_solver)
 
 
 def loop_pre_bilateral_sdr(backpack: LoopPreBackpackS2BilateralDict,
                            for_testing=False,
                            pruned=True,
-                           compensation=0.0) \
+                           compensation=0.0,
+						   solver='CBC') \
 		-> (
 				list[float],
 				Union[float, None],
@@ -915,6 +984,7 @@ def loop_pre_bilateral_sdr(backpack: LoopPreBackpackS2BilateralDict,
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param pruned: if True, consider only offers that would be cleared on a market pool
 	:param compensation: float between 0 and 1 that establishes the relative compensation
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
 			i.e. the iteration with the best objective function value;
@@ -928,16 +998,26 @@ def loop_pre_bilateral_sdr(backpack: LoopPreBackpackS2BilateralDict,
 	assert 0.0 <= compensation <= 1.0, 'Please provide a compensation value between 0.0 and 1.0.'
 	pricing_func = compute_pruned_sdr if pruned else compute_sdr
 	opt_func = run_pre_two_stage_collective_bilateral_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_loop(backpack,
 	                    pricing_func,
 	                    opt_func,
 	                    for_testing,
-	                    compensation=compensation)
+	                    compensation=compensation,
+						solver=valid_solver)
 
 
 def loop_pre_bilateral_crossing_value(backpack: LoopPreBackpackS2BilateralDict,
                                       for_testing=False,
-                                      small_increment=0.0) \
+                                      small_increment=0.0,
+									  solver='CBC') \
 		-> (
 				list[float],
 				Union[float, None],
@@ -1002,6 +1082,7 @@ def loop_pre_bilateral_crossing_value(backpack: LoopPreBackpackS2BilateralDict,
 	}
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param small_increment: float to add to buy offers' value and subtract from sell offers' value
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed for the best iteration,
 			i.e. the iteration with the best objective function value;
@@ -1014,11 +1095,20 @@ def loop_pre_bilateral_crossing_value(backpack: LoopPreBackpackS2BilateralDict,
 	"""
 	pricing_func = compute_crossing_value
 	opt_func = run_pre_two_stage_collective_bilateral_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_loop(backpack,
 	                    pricing_func,
 	                    opt_func,
 	                    for_testing,
-	                    small_increment=small_increment)
+	                    small_increment=small_increment,
+						solver=valid_solver)
 
 
 # -- POST-DELIVERY HIGHWAYS --------------------------------------------------------------------------------------------
@@ -1026,6 +1116,7 @@ def _common_highway(backpack: LoopPreBackpackS2PoolDict,
                     pricing_func: Callable,
                     optimization_func: Callable,
                     for_testing: False,
+					solver: str,
                     **kwargs: Unpack[RequestParams]) \
 		-> (
 				list[float],
@@ -1037,6 +1128,7 @@ def _common_highway(backpack: LoopPreBackpackS2PoolDict,
 	:param pricing_func: market mechanism function to be applied
 	:param optimization_func: optimization function to be applied
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:param kwargs: necessary flags or numeric parameters that are required by the passed func
 	:return: tuple with:
 		- array of float with the LEM prices computed;
@@ -1057,6 +1149,8 @@ def _common_highway(backpack: LoopPreBackpackS2PoolDict,
 
 	# Auxiliary function for logging
 	dynamic_size = lambda val: int(3 - len(str(int(val))))
+
+	milp_results = None  # Initialize the results variable
 
 	logger.info('################################################################')
 	while True:
@@ -1086,7 +1180,7 @@ def _common_highway(backpack: LoopPreBackpackS2PoolDict,
 
 		# Run the optimization algorithm
 		logger.info(f'Solving MILP...')
-		milp_results = optimization_func(backpack, for_testing)
+		milp_results = optimization_func(backpack, for_testing, solver)
 
 		# Retrieve the new objective function value from the collective optimization,
 		# that is associated with the REC total cost of operation
@@ -1113,7 +1207,8 @@ def _common_highway(backpack: LoopPreBackpackS2PoolDict,
 def loop_post_pool_mmr(backpack: LoopPostBackpackS2PoolDict,
                        for_testing=False,
                        pruned=True,
-                       divisor=2.0) \
+                       divisor=2.0,
+					   solver='CBC') \
 		-> (
 				list[float],
 				CollectivePostOutputsS2PoolDict
@@ -1160,6 +1255,7 @@ def loop_post_pool_mmr(backpack: LoopPostBackpackS2PoolDict,
 	and the most valuable selling offer; By default, the value is 2.0, making the price equidistant from both offers;
 	Higher values skew the price towards the selling offers and smaller values towards the buying offers.
 	Note: must be non-negative and > 0.0
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed;
 			the order of the values in the array follows the same order of the provided data
@@ -1168,17 +1264,27 @@ def loop_post_pool_mmr(backpack: LoopPostBackpackS2PoolDict,
 	assert 0.0 <= divisor, 'Please provide a divisor value greater than or equal to 0.0.'
 	pricing_func = compute_pruned_mmr if pruned else compute_mmr
 	opt_func = run_post_two_stage_collective_pool_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_highway(backpack,
 	                       pricing_func,
 	                       opt_func,
 	                       for_testing,
-	                       divisor=divisor)
+	                       divisor=divisor,
+						   solver=valid_solver)
 
 
 def loop_post_pool_sdr(backpack: LoopPostBackpackS2PoolDict,
                        for_testing=False,
                        pruned=True,
-                       compensation=0.0) \
+                       compensation=0.0,
+					   solver='CBC') \
 		-> (
 				list[float],
 				CollectivePostOutputsS2PoolDict
@@ -1222,6 +1328,7 @@ def loop_post_pool_sdr(backpack: LoopPostBackpackS2PoolDict,
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param pruned: if True, consider only offers that would be cleared on a market pool
 	:param compensation: float between 0 and 1 that establishes the relative compensation
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed;
 			the order of the values in the array follows the same order of the provided data
@@ -1230,16 +1337,26 @@ def loop_post_pool_sdr(backpack: LoopPostBackpackS2PoolDict,
 	assert 0.0 <= compensation <= 1.0, 'Please provide a compensation value between 0.0 and 1.0.'
 	pricing_func = compute_pruned_sdr if pruned else compute_sdr
 	opt_func = run_post_two_stage_collective_pool_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_highway(backpack,
 	                       pricing_func,
 	                       opt_func,
 	                       for_testing,
-	                       compensation=compensation)
+	                       compensation=compensation,
+						   solver=valid_solver)
 
 
 def loop_post_pool_crossing_value(backpack: LoopPostBackpackS2PoolDict,
                                   for_testing=False,
-                                  small_increment=0.0) \
+                                  small_increment=0.0,
+								  solver='CBC') \
 		-> (
 				list[float],
 				CollectivePostOutputsS2PoolDict
@@ -1282,6 +1399,7 @@ def loop_post_pool_crossing_value(backpack: LoopPostBackpackS2PoolDict,
 	}
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param small_increment: float to add to buy offers' value and subtract from sell offers' value
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed;
 			the order of the values in the array follows the same order of the provided data
@@ -1289,17 +1407,27 @@ def loop_post_pool_crossing_value(backpack: LoopPostBackpackS2PoolDict,
 	"""
 	pricing_func = compute_crossing_value
 	opt_func = run_post_two_stage_collective_pool_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_highway(backpack,
 	                       pricing_func,
 	                       opt_func,
 	                       for_testing,
-	                       small_increment=small_increment)
+	                       small_increment=small_increment,
+						   solver=valid_solver)
 
 
 def loop_post_bilateral_mmr(backpack: LoopPostBackpackS2BilateralDict,
                             for_testing=False,
                             pruned=True,
-                            divisor=2.0) \
+                            divisor=2.0,
+							solver='CBC') \
 		-> (
 				list[float],
 				CollectivePostOutputsS2BilateralDict
@@ -1346,6 +1474,7 @@ def loop_post_bilateral_mmr(backpack: LoopPostBackpackS2BilateralDict,
 	and the most valuable selling offer; By default, the value is 2.0, making the price equidistant from both offers;
 	Higher values skew the price towards the selling offers and smaller values towards the buying offers.
 	Note: must be non-negative and > 0.0
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed;
 			the order of the values in the array follows the same order of the provided data
@@ -1354,17 +1483,27 @@ def loop_post_bilateral_mmr(backpack: LoopPostBackpackS2BilateralDict,
 	assert 0.0 <= divisor, 'Please provide a divisor value greater than or equal to 0.0.'
 	pricing_func = compute_pruned_mmr if pruned else compute_mmr
 	opt_func = run_post_two_stage_collective_bilateral_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_highway(backpack,
 	                       pricing_func,
 	                       opt_func,
 	                       for_testing,
-	                       divisor=divisor)
+	                       divisor=divisor,
+						   solver=valid_solver)
 
 
 def loop_post_bilateral_sdr(backpack: LoopPostBackpackS2BilateralDict,
                             for_testing=False,
                             pruned=True,
-                            compensation=0.0) \
+                            compensation=0.0,
+							solver='CBC') \
 		-> (
 				list[float],
 				CollectivePostOutputsS2BilateralDict
@@ -1408,6 +1547,7 @@ def loop_post_bilateral_sdr(backpack: LoopPostBackpackS2BilateralDict,
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param pruned: if True, consider only offers that would be cleared on a market pool
 	:param compensation: float between 0 and 1 that establishes the relative compensation
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed;
 			the order of the values in the array follows the same order of the provided data
@@ -1416,16 +1556,26 @@ def loop_post_bilateral_sdr(backpack: LoopPostBackpackS2BilateralDict,
 	assert 0.0 <= compensation <= 1.0, 'Please provide a compensation value between 0.0 and 1.0.'
 	pricing_func = compute_pruned_sdr if pruned else compute_sdr
 	opt_func = run_post_two_stage_collective_bilateral_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_highway(backpack,
 	                       pricing_func,
 	                       opt_func,
 	                       for_testing,
-	                       compensation=compensation)
+	                       compensation=compensation,
+						   solver=valid_solver)
 
 
 def loop_post_bilateral_crossing_value(backpack: LoopPostBackpackS2BilateralDict,
                                        for_testing=False,
-                                       small_increment=0.0) \
+                                       small_increment=0.0,
+									   solver='CBC') \
 		-> (
 				list[float],
 				CollectivePostOutputsS2BilateralDict
@@ -1469,6 +1619,7 @@ def loop_post_bilateral_crossing_value(backpack: LoopPostBackpackS2BilateralDict
 	}
 	:param for_testing: when testing set to True, since parallelization of first stage does not work
 	:param small_increment: float to add to buy offers' value and subtract from sell offers' value
+	:param solver: one of "CBC", CPLEX" (other string reverts to "CBC"; if "CPLEX" is not available, reverts to "CBC")
 	:return: tuple with:
 		- array of float with the LEM prices computed;
 			the order of the values in the array follows the same order of the provided data
@@ -1476,8 +1627,17 @@ def loop_post_bilateral_crossing_value(backpack: LoopPostBackpackS2BilateralDict
 	"""
 	pricing_func = compute_crossing_value
 	opt_func = run_post_two_stage_collective_bilateral_milp
+
+	# Validate the solver used
+	if solver == 'CPLEX' and IS_CPLEX_AVAILABLE:
+		valid_solver = 'CPLEX'
+	else:
+		valid_solver = 'CBC'
+	logger.info(f'Solver: {valid_solver}')
+
 	return _common_highway(backpack,
 	                       pricing_func,
 	                       opt_func,
 	                       for_testing,
-	                       small_increment=small_increment)
+	                       small_increment=small_increment,
+						   solver=valid_solver)

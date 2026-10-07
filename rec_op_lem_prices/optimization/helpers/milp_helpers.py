@@ -24,7 +24,7 @@ def dict_none_lists(m_dim: int, designations: list[str]) -> dict[list]:
 	"""
 	Returns a dictionary of NaN lists with len = "m_dim", whose keys are the elements in "designations".
 	:param m_dim: desired length of the lists
-	:param designations: list of strings that will serve as keys to the returned dictionary
+	:param designations: list of strings that will serve as keys to the returned dictionary.
 	:return: dictionary pointing to lists of NaN
 	"""
 	return {d: none_lists(m_dim) for d in designations}
