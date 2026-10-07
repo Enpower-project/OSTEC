@@ -9,9 +9,6 @@ from rec_op_lem_prices.pricing_mechanisms_functions import (
 	vanilla_crossing_value,
 	vanilla_mmr,
 	vanilla_sdr,
-	vanilla_mmr_plus,
-	vanilla_sdr_plus,
-	vanilla_crossing_value_plus,
 	loop_post_bilateral_crossing_value,
 	loop_post_bilateral_mmr,
 	loop_post_bilateral_sdr,
@@ -187,51 +184,6 @@ def test_loop_post_bilateral_crossing_value():
 	assert r[0] == LOOP_POST_OUTPUTS_S2_BILATERAL_CV
 
 
-def test_vanilla_mmr_plus():
-	buy_offers = [{'origin': 1, 'amount': 500, 'value': 45},
-				  {'origin': 2, 'amount': 500, 'value': 40}]
-	sell_offers = [{'origin': 4, 'amount': -500, 'value': 0},
-				   {'origin': 5, 'amount': -500, 'value': 10},
-				   {'origin': 6, 'amount': -100, 'value': 20}]
-
-	cross_l_p2p, accepted_buy_offers, accepted_sell_offers = vanilla_mmr_plus(buy_offers, sell_offers)
-	assert cross_l_p2p == 25.0
-	assert accepted_buy_offers == [{'origin': 1, 'amount': 500, 'value': 45},
-								   {'origin': 2, 'amount': 500, 'value': 40}]
-	assert accepted_sell_offers == [{'origin': 4, 'amount': 500, 'value': 0},
-									{'origin': 5, 'amount': 500, 'value': 10}]
-
-
-def test_vanilla_sdr_plus():
-	buy_offers = [{'origin': 1, 'amount': 500, 'value': 45},
-				  {'origin': 2, 'amount': 500, 'value': 40},
-				  {'origin': 3, 'amount': 100, 'value': 35}]
-	sell_offers = [{'origin': 4, 'amount': -500, 'value': 0},
-				   {'origin': 5, 'amount': -500, 'value': 10}]
-
-	cross_l_p2p, accepted_buy_offers, accepted_sell_offers = vanilla_sdr_plus(buy_offers, sell_offers)
-	assert cross_l_p2p == 10.0
-	assert accepted_buy_offers == [{'origin': 1, 'amount': 500, 'value': 45},
-								   {'origin': 2, 'amount': 500, 'value': 40}]
-	assert accepted_sell_offers == [{'origin': 4, 'amount': 500, 'value': 0},
-									{'origin': 5, 'amount': 500, 'value': 10}]
-
-
-def test_vanilla_crossing_value_plus():
-	buy_offers = [{'origin': 1, 'amount': 500, 'value': 45},
-				  {'origin': 2, 'amount': 500, 'value': 40},
-				  {'origin': 3, 'amount': 100, 'value': 35}]
-	sell_offers = [{'origin': 4, 'amount': -500, 'value': 0},
-				   {'origin': 5, 'amount': -500, 'value': 10}]
-
-	cross_l_p2p, accepted_buy_offers, accepted_sell_offers = vanilla_crossing_value_plus(buy_offers, sell_offers)
-	assert cross_l_p2p == 35.0
-	assert accepted_buy_offers == [{'origin': 1, 'amount': 500, 'value': 45},
-								   {'origin': 2, 'amount': 500, 'value': 40}]
-	assert accepted_sell_offers == [{'origin': 4, 'amount': 500, 'value': 0},
-									{'origin': 5, 'amount': 500, 'value': 10}]
-
-
 if __name__ == '__main__':
 	test_vanilla_mmr()
 	test_vanilla_sdr()
@@ -250,6 +202,3 @@ if __name__ == '__main__':
 	test_loop_post_bilateral_sdr()
 	test_loop_pre_bilateral_crossing_value()
 	test_loop_post_bilateral_crossing_value()
-	test_vanilla_mmr_plus()
-	test_vanilla_sdr_plus()
-	test_vanilla_crossing_value_plus()

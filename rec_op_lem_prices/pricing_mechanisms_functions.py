@@ -11,9 +11,7 @@ from rec_op_lem_prices.pricing_mechanisms.module.PricingMechanisms import (
 	compute_crossing_value,
 	compute_mmr,
 	compute_pruned_mmr,
-	compute_pruned_mmr_plus,
 	compute_pruned_sdr,
-	compute_pruned_sdr_plus,
 	compute_sdr,
 	get_accepted_offers,
 	stop_criterion
@@ -144,82 +142,6 @@ def vanilla_crossing_value(buys: OffersList,
 	logger.info('Computing a pool market clearing... DONE!')
 
 	return result
-
-
-# -- VANILLA PLUS ACCEPTED OFFERS --------------------------------------------------------------------------------------
-def vanilla_mmr_plus(buys: OffersList,
-					 sells: OffersList,
-					 divisor=2.0) -> (float, OffersList, OffersList):
-	"""
-	Exact same function as "vanilla_mmr" with "pruned" hyperparameter set to True,
-	but also returns the accepted offers that originated the price.
-	:param buys: list of buying offers, each with the structure {'origin': str, 'amount': float, 'value': float};
-	amount is given in kWh, value in €/kWh and origin is an identification id, unique to each offer
-	:param sells: list with the same structure of "buys" parameter, but for selling offers
-	:param divisor: the value establishing how close the LEM price is positioned from the least valuable buying offer
-	and the most valuable selling offer; By default, the value is 2.0, making the price equidistant from both offers;
-	Higher values skew the price towards the selling offers and smaller values towards the buying offers.
-	Note: must be non-negative and > 0.0
-	:return: calculated price for transactions, in €/kWh, along with the accepted offers (buy and sell, respectively)
-	that originated the price
-	"""
-	assert 0.0 <= divisor, 'Please provide a divisor value greater than or equal to 0.0.'
-
-	logger.info(f'Computing a pruned MMR...')
-
-	result, accepted_buys, accepted_sells = compute_pruned_mmr_plus(buys, sells, divisor)
-
-	logger.info(f'Computing a pruned MMR... DONE!')
-
-	return result, accepted_buys, accepted_sells
-
-
-def vanilla_sdr_plus(buys: OffersList,
-					 sells: OffersList,
-					 compensation=0.0) -> (float, OffersList, OffersList):
-	"""
-	Exact same function as "vanilla_crossing_value",
-	but also returns the accepted offers that originated the price.
-	:param buys: list of buying offers, each with the structure {'origin': str, 'amount': float, 'value': float};
-	amount is given in kWh, value in €/kWh and origin is an identification id, unique to each offer
-	:param sells: list with the same structure of "buys" parameter, but for selling offers
-	:param compensation: float between 0 and 1 that establishes the relative compensation
-	:return: calculated price for transactions, in €/kWh, along with the accepted offers (buy and sell, respectively)
-	that originated the price
-	"""
-	assert 0.0 <= compensation <= 1.0, 'Please provide a compensation value between 0.0 and 1.0.'
-
-	logger.info(f'Computing a pruned SDR...')
-
-	result, accepted_buys, accepted_sells = compute_pruned_sdr_plus(buys, sells, compensation)
-
-	logger.info(f'Computing a pruned SDR... DONE!')
-
-	return result, accepted_buys, accepted_sells
-
-
-def vanilla_crossing_value_plus(buys: OffersList,
-								sells: OffersList,
-								small_increment=0.0) -> (float, OffersList, OffersList):
-	"""
-	Exact same function as "vanilla_sdr",
-	but also returns the accepted offers that originated the price.
-	If set, a small_increment if added to sell offers' values and subtracted to buy offers' values.
-	:param buys: list of buying offers, each with the structure {'origin': str, 'amount': float, 'value': float};
-	amount is given in kWh, value in €/kWh and origin is an identification id, unique to each offer
-	:param sells: list with the same structure of "buys" parameter, but for selling offers
-	:param small_increment: float to add to buy offers' value and subtract from sell offers' value
-	:return: calculated price for transactions, in €/kWh, along with the accepted offers (buy and sell, respectively)
-	that originated the price
-	"""
-	logger.info('Computing a pool market clearing...')
-
-	result = compute_crossing_value(buys, sells, small_increment)
-	accepted_buys, accepted_sells = get_accepted_offers(buys, sells)
-
-	logger.info('Computing a pool market clearing... DONE!')
-
-	return result, accepted_buys, accepted_sells
 
 
 # -- DUALS -------------------------------------------------------------------------------------------------------------

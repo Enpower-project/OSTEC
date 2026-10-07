@@ -5,11 +5,15 @@ The implementation is specific to a pool market structure.
 import itertools
 import os
 import re
+import math
 
 from rec_op_lem_prices.configs.configs import (
 	MIPGAP,
 	SOLVER,
 	TIMEOUT
+)
+from rec_op_lem_prices.optimization.helpers.bat_deg_linearization_helpers import (
+get_curve_points
 )
 from rec_op_lem_prices.optimization.helpers.milp_helpers import (
 	dict_none_lists,
@@ -60,6 +64,7 @@ class StageTwoMILPPool:
 		self._soc_max = {}  # maximum state of charge of the batteries [%]
 		self._init_e_bat = {}  # initial energy content of the batteries [kWh]
 		self._deg_cost = {}  # estimated degradation cost of the batteries of n [€/kWh]
+		self._bat_deg_data = backpack.get('bat_deg_data') #Battery degradation data
 		self._c_ind = None  # objective function values of each Meters' 1st stage MILP solution
 		self._l_grid = backpack.get('l_grid')  # access tariff of the local grid [€/kWh]
 		self._l_lem = backpack.get('l_lem')  # price for LEM transactions [€/kWh]
@@ -74,6 +79,13 @@ class StageTwoMILPPool:
 		self._pmax_c_ev = {}  # Maximum power charge of vehicle ev at CPE n, in kW
 		self._pmax_d_ev = {}  # Maximum power discharge of vehicle ev at CPE n, in kW
 		self._bin_ev = {}  # Whether a vehicle ev at CPE n is plugged-in or not (if plugged-in = 1 else = 0)
+		# Battery degragation
+		self._num_pts_real = {}
+		self._num_seg_approx = {}
+		self._curve = {}
+		self._capex = {}
+		self._small_m = 1e-4
+		self._big_m_bat_deg = 1e6
 		# MILP variables
 		self.milp = None  # for storing the MILP formulation
 		self.solver = solver  # solver chosen for the MILP
@@ -164,6 +176,13 @@ class StageTwoMILPPool:
 				self._deg_cost[n] = {b: meter_btm_storage[b]['degradation_cost'] for b in self.sets_btm_storage[n]}
 			else:
 				self.sets_btm_storage[n] = []
+
+		# Unpack battery degradation data
+		if self._bat_deg_data is not None:
+			self._num_pts_real = self._bat_deg_data['num_pts_real']
+			self._num_seg_approx = self._bat_deg_data['num_seg_approx']
+			self._curve = self._bat_deg_data['curve']
+			self._capex = self._bat_deg_data['capex']
 
 		# Unpack EVs information
 		for n in self.set_meters:
@@ -292,6 +311,25 @@ class StageTwoMILPPool:
 		p_ev_charge = {n: dict_none_lists(self.time_intervals, self.sets_btm_ev[n]) for n in self.set_meters}
 		# power discharge of ev [kW]
 		p_ev_discharge = {n: dict_none_lists(self.time_intervals, self.sets_btm_ev[n]) for n in self.set_meters}
+		# Battery degradation
+		if self._bat_deg_data is not None:
+			e_li_ion_aux = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
+			cost_deg = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
+			cost_deg_act = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
+			cost_deg_aux = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
+			cost_deg_act_seg = {meter: {storage: {seg: [math.nan for _ in range(int(self.time_intervals))] for seg in range(self._num_seg_approx)}
+																			for storage in storages} for meter, storages in self.sets_btm_storage.items()}
+			cost_deg_aux_seg = {meter: {storage: {seg: [math.nan for _ in range(int(self.time_intervals))] for seg in range(self._num_seg_approx)}
+																			for storage in storages} for meter, storages in self.sets_btm_storage.items()}
+			soc_act_seg = {meter: {storage: {seg: [math.nan for _ in range(int(self.time_intervals))] for seg in range(self._num_seg_approx)}
+																			for storage in storages} for meter, storages in self.sets_btm_storage.items()}
+			soc_aux_seg = {meter: {storage: {seg: [math.nan for _ in range(int(self.time_intervals))] for seg in range(self._num_seg_approx)}
+																			for storage in storages} for meter, storages in self.sets_btm_storage.items()}
+			delta_deg_act = {meter: {storage: {seg: [math.nan for _ in range(int(self.time_intervals))] for seg in range(self._num_seg_approx)}
+																			for storage in storages} for meter, storages in self.sets_btm_storage.items()}
+			delta_deg_aux = {meter: {storage: {seg: [math.nan for _ in range(int(self.time_intervals))] for seg in range(self._num_seg_approx)}
+																			for storage in storages} for meter, storages in self.sets_btm_storage.items()}
+
 		# EWH - Initialize decision variables
 		if bool(self._ewh_dataset):
 			temp = {n: dict_none_lists(self.time_intervals, self.set_ewh[n]) for n in self.set_meters}
@@ -350,6 +388,20 @@ class StageTwoMILPPool:
 				e_bc[n][b][t] = LpVariable('e_bc_' + increment, lowBound=0)
 				e_bd[n][b][t] = LpVariable('e_bd_' + increment, lowBound=0)
 				delta_bc[n][b][t] = LpVariable('delta_bc_' + increment, cat=LpBinary)
+				# Battery degradation
+				if self._bat_deg_data is not None:
+					e_li_ion_aux[n][b][t] = LpVariable('e_li_ion_aux_' + increment, lowBound=0)
+					cost_deg[n][b][t] = LpVariable('cost_deg_' + increment, lowBound=0)
+					cost_deg_act[n][b][t] = LpVariable('cost_deg_act_' + increment, lowBound=0)
+					cost_deg_aux[n][b][t] = LpVariable('cost_deg_aux_' + increment, lowBound=0)
+					for ds in range(0, self._num_seg_approx):
+						increment = f'{n}_{b}_ds{ds}_t{t:03d}'
+						cost_deg_act_seg[n][b][ds][t] = LpVariable('cost_deg_act_seg_' + increment, lowBound=0)
+						cost_deg_aux_seg[n][b][ds][t] = LpVariable('cost_deg_aux_seg_' + increment, lowBound=0)
+						soc_act_seg[n][b][ds][t] = LpVariable('soc_act_seg_' + increment, lowBound=0)
+						soc_aux_seg[n][b][ds][t] = LpVariable('soc_aux_seg_' + increment, lowBound=0)
+						delta_deg_act[n][b][ds][t] = LpVariable('delta_deg_act_' + increment, cat=LpBinary)
+						delta_deg_aux[n][b][ds][t] = LpVariable('delta_deg_aux_' + increment, cat=LpBinary)
 			for ev in self.sets_btm_ev[n]:
 				increment = f'{n}_{ev}_t{t:03d}'
 				ev_stored[n][ev][t] = LpVariable('ev_stored_' + increment, lowBound=0)
@@ -393,7 +445,22 @@ class StageTwoMILPPool:
 			for t in self.time_series
 		)
 
+		#Removing the older bat degradation and including the new one
+		if self._bat_deg_data is not None:
+			objective += lpSum(
+				-self._deg_cost[n][b] * e_bd[n][b][t] + cost_deg[n][b][t]
+				for n in self.set_meters
+				for b in self.sets_btm_storage[n]
+				for t in self.time_series
+			)
+
+
 		self.milp += objective, 'Objective Function'
+
+		# Battery degradation - Building the segments
+		if self._bat_deg_data is not None:
+			curve_data = get_curve_points(self._curve, self._capex, self._num_pts_real,
+										  self._num_seg_approx)
 
 		# Eq. 11-31: Constraints
 		for t in self.time_series:
@@ -566,6 +633,7 @@ class StageTwoMILPPool:
 							1 - delta_rec_balance[t] + delta_meter_balance[n][t]), \
 					'Buy_all_deficit_high_' + increment
 
+
 			for b in self.sets_btm_storage[n]:
 				increment = f'{n}_{b}_t{t:03d}'
 
@@ -604,6 +672,159 @@ class StageTwoMILPPool:
 						e_bd[n][b][t] * 1 / self._delta_t <= self._p_max[n][b] * (1 - delta_bc[n][b][t]), \
 						'Discharge_rate_limit' + increment
 
+					###########BATTERY DEGRADATION CONSTRAINTS#############
+					if self._bat_deg_data is not None:
+						#Constraint "LDEG_1" - initial auxiliary SoC update
+						if t == 0:
+							self.milp += (e_li_ion_aux[n][b][t] == self._init_e_bat[n][b] - e_bd[n][b][t] * (
+										1 / self._eff_bd[n][b]) * self._delta_t,
+										  f"LDEG_1_Aux_initial_E_update_{n}_{b}_{t:03d}"
+										  )
+						# Constraint "LDEG_2" - subsequent auxiliary SoC update
+						else:
+							self.milp += (
+							e_li_ion_aux[n][b][t] == e_bat[n][b][t - 1] - e_bd[n][b][t] * (1 / self._eff_bd[n][b]) * self._delta_t,
+							f"LDEG_2_Aux_E_update_{n}_{b}_{t:03d}"
+							)
+
+						# Constraint "LDEG_3" - Li-on batteries degradation cost determination
+						self.milp += (cost_deg[n][b][t] == cost_deg_aux[n][b][t] - cost_deg_act[n][b][t],
+									  'LDEG_3_Degradation_cost' + increment)
+
+
+						# Degradation cost for a SoC value, at each instant "t" -
+						# corresponds to the summation of the cost for each segment, where only the segment under analysis
+						# may have a value greater than zero.
+						# Constraint "LDEG_7.1" - For an actual SoC value
+						self.milp += (
+							cost_deg_act[n][b][t] == lpSum(
+								cost_deg_act_seg[n][b][ds][t] for ds in range(self._num_seg_approx)),
+							'LDEG_7.1_Temporal_Act_SoC_Deg_Cost' + increment
+						)
+
+						# Constraint "LDEG_7.2" - For an auxiliary SoC value
+						self.milp += (
+							cost_deg_aux[n][b][t] == lpSum(
+								cost_deg_aux_seg[n][b][ds][t] for ds in range(self._num_seg_approx)),
+							"LDEG_7.2_Temporal_Aux_SoC_Deg_Cost" + increment
+						)
+
+						# The sum of the values of all segments SoC must be equal to actual and auxiliary SoC values
+						# Constraint "LDEG_9.1" - For actual SoC
+						self.milp += (
+							lpSum(soc_act_seg[n][b][ds][t] for ds in range(self._num_seg_approx)) == e_bat[n][b][t] * (
+										1 / self._e_bn[n][b]),
+							"LDEG_9.1_Define_Act_SoC_Value" + increment
+						)
+
+						# Constraint "LDEG_9.2" - For auxiliary SoC
+						self.milp += (
+							lpSum(soc_aux_seg[n][b][ds][t] for ds in range(self._num_seg_approx)) == e_li_ion_aux[n][b][t] * (
+										1 / self._e_bn[n][b]),
+							'LDEG_9.2_Define_Aux_SoC_Value_' + increment
+						)
+
+						# Ensuring non-simultaneity in the selection of line segments "ds".
+						# Constraint "LDEG_10.1" - For an actual SoC value
+						self.milp += (lpSum(delta_deg_act[n][b][ds][t] for ds in range(self._num_seg_approx)) == 1,
+									  "LDEG_10.1_Non_simultaneity_Act_Seg" + increment
+									  )
+
+						# Constraint "LDEG_10.2" - For an auxiliary SoC value
+						self.milp += (
+							lpSum(delta_deg_aux[n][b][ds][t] for ds in range(self._num_seg_approx)) == 1,
+							"LDEG_10.2_Non_simultaneity_Aux_Seg" + increment
+						)
+
+						# Valid expression for all line_segments belonging to piecewise line_segments range
+						for ds in range(self._num_seg_approx):
+							# Degradation cost function value calculation per segment.
+							# Constraint "LDEG_4.1" - For an actual SoC value
+							self.milp += (
+								cost_deg_act_seg[n][b][ds][t] ==
+								curve_data['cost_max'][ds] * delta_deg_act[n][b][ds][t] +
+								curve_data['slope'][ds] * soc_act_seg[n][b][ds][t] -
+								curve_data['slope'][ds] * curve_data['soc_min'][ds] * delta_deg_act[n][b][ds][t],
+								f"LDEG_4.1_Cost_Seg_Act_SoC_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Constraint "LDEG_4.2" - For an auxiliary SoC value
+							self.milp += (
+								cost_deg_aux_seg[n][b][ds][t] ==
+								curve_data['cost_max'][ds] * delta_deg_aux[n][b][ds][t] +
+								curve_data['slope'][ds] * soc_aux_seg[n][b][ds][t] -
+								curve_data['slope'][ds] * curve_data['soc_min'][ds] * delta_deg_aux[n][b][ds][t],
+								f"LDEG_4.2_Cost_Seg_Aux_SoC_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Degradation cost function value bounds
+							# Constraint "LDEG_5.1" - minimum bound for an actual SoC value
+							self.milp += (
+								delta_deg_act[n][b][ds][t] * curve_data['cost_min'][ds] <= cost_deg_act_seg[n][b][ds][t],
+								f"LDEG_5.1_Deg_Act_Cost_Minimum_Bound_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Constraint "LDEG_5.1" - maximum bound for an actual SoC value
+							self.milp += (
+								cost_deg_act_seg[n][b][ds][t] <=
+								delta_deg_act[n][b][ds][t] * curve_data['cost_max'][ds] + self._small_m,
+								f"LDEG_5.1_Deg_Act_Cost_Maximum_Bound_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Constraint "LDEG_5.2" - minimum bound for an auxiliary SoC value
+							self.milp += (
+								delta_deg_aux[n][b][ds][t] * curve_data['cost_min'][ds] <= cost_deg_aux_seg[n][b][ds][t],
+								f"LDEG_5.2_Deg_Aux_Cost_Minimum_Bound_{n}_{b}_{ds}_{t:03d}"
+							)
+							# Constraint "LDEG_5.2" - maximum bound for an auxiliary SoC value
+							self.milp += (
+								cost_deg_aux_seg[n][b][ds][t] <=
+								delta_deg_aux[n][b][ds][t] * curve_data['cost_max'][ds] + self._small_m,
+								f"LDEG_5.2_Deg_Aux_Cost_Maximum_Bound_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Only allows the degradation cost determination for the line segment containing
+							# the SoC value under analysis
+							# Constraint "LDEG_6.1" - For an actual SoC value
+							self.milp += (
+								cost_deg_act_seg[n][b][ds][t] <= self._big_m_bat_deg * delta_deg_act[n][b][ds][
+									t] + self._small_m,
+								f"LDEG_6.1_Seg_Activation_Act_SoC_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Constraint "LDEG_6.2" - For an auxiliary SoC value
+							self.milp += (
+								cost_deg_aux_seg[n][b][ds][t] <= self._big_m_bat_deg * delta_deg_aux[n][b][ds][
+									t] + self._small_m,
+								f"LDEG_6.2_Seg_Activation_Aux_SoC_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# SoC value must be greater than the minimum SoC and less than the maximum SoC
+							# considered for the line segment it falls within.
+							# Constraint "LDEG_8.1" - minimum bound for an actual SoC value
+							self.milp += (
+								delta_deg_act[n][b][ds][t] * curve_data['soc_min'][ds] <= soc_act_seg[n][b][ds][t],
+								f"LDEG_8.1_Act_SoC_Segment_lower_bound_{n}_{b}_{ds}_{t:03d}"
+							)
+							# Constraint "LDEG_8.1" - maximum bound for an actual SoC value
+							self.milp += (
+								soc_act_seg[n][b][ds][t] <=
+								delta_deg_act[n][b][ds][t] * curve_data['soc_max'][ds] + self._small_m,
+								f"LDEG_8.1_Act_SoC_Segment_upper_bound_{n}_{b}_{ds}_{t:03d}"
+							)
+
+							# Constraint "LDEG_8.2" - minimum bound for an auxiliary SoC value
+							self.milp += (
+								delta_deg_aux[n][b][ds][t] * curve_data['soc_min'][ds] <= soc_aux_seg[n][b][ds][t],
+								f"LDEG_8.2_Aux_SoC_Segment_lower_bound_{n}_{b}_{ds}_{t:03d}"
+							)
+							# Constraint "LDEG_8.2" - maximum bound for an auxiliary SoC value
+							self.milp += (
+								soc_aux_seg[n][b][ds][t] <=
+								delta_deg_aux[n][b][ds][t] * curve_data['soc_max'][ds] + self._small_m,
+								f"LDEG_8.2_Aux_SoC_Segment_upper_bound_{n}_{b}_{ds}_{t:03d}"
+							)
+							######END BATTERY DEGRADATION CONSTRAINTS##################
 			# EVs constraints
 			for ev in self.sets_btm_ev[n]:
 				increment = f'{n}_{ev}_t{t:03d}'
@@ -843,6 +1064,9 @@ class StageTwoMILPPool:
 		outputs['e_bc'] = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
 		outputs['e_bd'] = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
 		outputs['delta_bc'] = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
+		if self._bat_deg_data != None:
+			outputs['cost_deg'] = {n: dict_none_lists(self.time_intervals, self.sets_btm_storage[n]) for n in self.set_meters}
+
 		for n_meter in self.set_meters:
 			meter_btm_ev = self._meters_data[n_meter].get('btm_evs')  # Check if there are EVs
 			if meter_btm_ev is not None:
@@ -898,6 +1122,7 @@ class StageTwoMILPPool:
 			e_matchd = {key: key.replace('-', '_') for key in ewh_ids}
 			original_e_name = lambda v_name: [ori_e for ori_e in ewh_ids if e_matchd[ori_e] + '_' in v_name][0]
 			original_n_name = lambda v_name: [ori_n for ori_n in self.set_meters if matchd[ori_n] + '_' in v_name][0]
+
 
 		# Associate the values of the variables with the respective outputs' structure
 		for v in self.milp.variables():
@@ -980,6 +1205,11 @@ class StageTwoMILPPool:
 				n = original_n_name(v.name)
 				b = original_b_name(v.name)
 				outputs['delta_bc'][n][b][step_nr] = v.varValue
+			elif v.name.startswith("cost_deg_") and not (v.name.startswith("cost_deg_aux_") or v.name.startswith("cost_deg_act_")):
+				n = original_n_name(v.name)
+				b = original_b_name(v.name)
+				#print(f"cost_deg: {v.name} → {v.varValue}")
+				outputs['cost_deg'][n][b][step_nr] = v.varValue
 			# EVs
 			elif re.search(f'ev_stored_', v.name):
 				n = original_n_name(v.name)

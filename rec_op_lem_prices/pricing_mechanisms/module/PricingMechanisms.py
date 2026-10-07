@@ -268,41 +268,6 @@ def compute_sdr(buys: OffersList, sells: OffersList, compensation=0.0) -> float:
 	return result
 
 
-def compute_pruned_mmr_plus(buys: OffersList, sells: OffersList, divisor=2.0) -> (float, OffersList, OffersList):
-	"""
-	Exact same function as "compute_pruned_mmr" but also returns the accepted offers that originated the price
-	:param buys: list of buying offers, each with the structure {'origin': str, 'amount': float, 'value': float};
-	amount is given in kWh, value in €/kWh and origin is an identification id, unique to each offer
-	:param sells: same structure but for selling offers
-	:param divisor: the value establishing how close the LEM price is positioned from the least valuable buying offer
-	and the most valuable selling offer; By default, the value is 2.0, making the price equidistant from both offers;
-	Higher values skew the price towards the selling offers and smaller values towards the buying offers.
-	Note: must be non-negative and > 0.0
-	:return: calculated price for transactions, in €/kWh, along with the accepted offers (buy and sell, respectively)
-	that originated the price
-	"""
-	logger.debug('(Opted for pruned MMR approach)')
-	pruned_buys, pruned_sells = get_accepted_offers(buys, sells)
-	price = compute_mmr(pruned_buys, pruned_sells, divisor)
-	return price, pruned_buys, pruned_sells
-
-
-def compute_pruned_sdr_plus(buys: OffersList, sells: OffersList, compensation=0.0) -> (float, OffersList, OffersList):
-	"""
-	Exact same function as "compute_pruned_sdr" but also returns the accepted offers that originated the price
-	:param buys: list of buying offers, each with the structure {'origin': str, 'amount': float, 'value': float};
-	amount is given in kWh, value in €/kWh and origin is an identification id, unique to each offer
-	:param sells: same structure but for selling offers
-	:param compensation: float between 0 and 1 that establishes the relative compensation
-	:return:  calculated price for transactions, in €/kWh, along with the accepted offers (buy and sell, respectively)
-	that originated the price
-	"""
-	logger.debug('(Opted for pruned SDR approach)')
-	pruned_buys, pruned_sells = get_accepted_offers(buys, sells)
-	price = compute_sdr(pruned_buys, pruned_sells, compensation)
-	return price, pruned_buys, pruned_sells
-
-
 def do_offers_cross(buys: OffersList, sells: OffersList) -> bool:
 	"""
 	Function to check if buy and sell offers cross on a market pool,

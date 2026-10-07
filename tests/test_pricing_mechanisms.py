@@ -9,9 +9,7 @@ from rec_op_lem_prices.pricing_mechanisms.module.PricingMechanisms import (
 	compute_sdr,
 	do_offers_cross,
 	get_accepted_offers,
-	stop_criterion,
-	compute_pruned_mmr_plus,
-	compute_pruned_sdr_plus
+	stop_criterion
 )
 
 
@@ -258,44 +256,12 @@ def test_stop_criterion():
 	assert (stop, round(criterion, 3)) == (True, 0.000)
 
 
-def test_compute_pruned_mmr_plus():
-	buy_offers = [{'origin': 1, 'amount': 500, 'value': 45},
-	              {'origin': 2, 'amount': 500, 'value': 40}]
-	sell_offers = [{'origin': 4, 'amount': -500, 'value': 0},
-				   {'origin': 5, 'amount': -500, 'value': 10},
-				   {'origin': 6, 'amount': -100, 'value': 20}]
-
-	cross_l_p2p, accepted_buy_offers, accepted_sell_offers = compute_pruned_mmr_plus(buy_offers, sell_offers)
-	assert cross_l_p2p == 25.0
-	assert accepted_buy_offers == [{'origin': 1, 'amount': 500, 'value': 45},
-								   {'origin': 2, 'amount': 500, 'value': 40}]
-	assert accepted_sell_offers == [{'origin': 4, 'amount': 500, 'value': 0},
-									{'origin': 5, 'amount': 500, 'value': 10}]
-
-
-def test_compute_pruned_sdr_plus():
-	buy_offers = [{'origin': 1, 'amount': 500, 'value': 45},
-	              {'origin': 2, 'amount': 500, 'value': 40},
-	              {'origin': 3, 'amount': 100, 'value': 35}]
-	sell_offers = [{'origin': 4, 'amount': -500, 'value': 0},
-				   {'origin': 5, 'amount': -500, 'value': 10}]
-
-	cross_l_p2p, accepted_buy_offers, accepted_sell_offers = compute_pruned_sdr_plus(buy_offers, sell_offers)
-	assert cross_l_p2p == 10.0
-	assert accepted_buy_offers == [{'origin': 1, 'amount': 500, 'value': 45},
-								   {'origin': 2, 'amount': 500, 'value': 40}]
-	assert accepted_sell_offers == [{'origin': 4, 'amount': 500, 'value': 0},
-									{'origin': 5, 'amount': 500, 'value': 10}]
-
-
 if __name__ == '__main__':
-	# test_compute_mmr()
-	# test_compute_pruned_mmr()
-	# test_compute_pruned_sdr()
-	# test_compute_sdr()
-	# test_do_offers_cross()
-	# test_get_accepted_offers()
-	# test_compute_crossing_value()
-	# test_stop_criterion()
-	test_compute_pruned_mmr_plus()
-	test_compute_pruned_sdr_plus()
+	test_compute_mmr()
+	test_compute_pruned_mmr()
+	test_compute_pruned_sdr()
+	test_compute_sdr()
+	test_do_offers_cross()
+	test_get_accepted_offers()
+	test_compute_crossing_value()
+	test_stop_criterion()
