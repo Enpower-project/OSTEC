@@ -74,7 +74,7 @@ forecast data.
 - Stationary batteries are modelled following a simple "bucket" model which is 
 technology-agnostic.
 
-## Flexible loads (ENPOWER)
+## Flexible loads
 Under the *ENPOWER* project, the optimization module was extended to also schedule **behind-the-meter flexible loads**, 
 alongside stationary batteries, as controllable assets of a REC member:
 
@@ -210,6 +210,12 @@ is run considering SDR as the pricing mechanism; pruned a compensated versions a
 ```loop_post_bilateral_crossing_value```
 - the overarching iterative algorithm presented above for the post-delivery timeframe and a *bilateral* market structure 
 is run considering the pool clearing as the pricing mechanism
+
+
+## Additional developments (other branches)
+Some extensions are maintained in separate branches of this repository:
+- [`battery-degradation`](../../tree/battery-degradation) – battery degradation modelling in the MILP formulations
+- [`hydrogen-integration`](../../tree/hydrogen-integration) – integration of hydrogen assets (e.g. Power-to-Hydrogen with variable efficiency)
 
 
 ## Install guide: use it as a library
