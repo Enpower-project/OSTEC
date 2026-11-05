@@ -248,3 +248,9 @@ install the library by using:
     import rec_op_lem_prices as rolp
     ```
   All methods listed above will be straightly available.  
+
+## Acknowledgements
+
+This work was developed within the following project:
+
+- **ENPOWER**: This project has received funding from the European Union’s Horizon Europe research and innovation programme under grant agreement No 101096354.
