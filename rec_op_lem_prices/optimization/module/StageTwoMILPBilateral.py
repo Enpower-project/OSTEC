@@ -534,7 +534,7 @@ class StageTwoMILPBilateral:
 
 		for t in self.time_series:
 			if t != 0:
-				objective += lpSum(hvac_cost_comfort[n][h][t] * 1 for n in self.set_meters for h in self.set_hvac[n]) + lpSum(self.hp_cost_comfort[n][hp][t] * 1 for hp in self.set_hp[n])
+				objective += lpSum(hvac_cost_comfort[n][h][t] * 10 for n in self.set_meters for h in self.set_hvac[n]) + lpSum(self.hp_cost_comfort[n][hp][t] * 10 for n in self.set_meters for hp in self.set_hp[n])
 
 		self.milp += objective, 'Objective Function'
 
@@ -586,7 +586,7 @@ class StageTwoMILPBilateral:
 				+ lpSum(p_ev_charge[n][ev][t] * self._delta_t - p_ev_discharge[n][ev][t] * self._delta_t
 				 for ev in self.sets_btm_ev[n]) \
 				+ lpSum(- varBackpack[n][e]['original_load'][t] + energyEWH[n][e][t] for e in self.set_ewh[n]) + \
-				lpSum(hvac_power[n][h][t] for h in self.set_hvac[n]) + lpSum(self.hp_power[n][hp][t]for hp in self.set_hp[n]), \
+				lpSum(hvac_power[n][h][t] * self._delta_t for h in self.set_hvac[n]) + lpSum(self.hp_power[n][hp][t]for hp in self.set_hp[n]), \
 				'C_met_' + increment
 
 			# Eq. 14
@@ -963,8 +963,7 @@ class StageTwoMILPBilateral:
 												 >= -self._big_m * hvac_mode[n][h][t]
 										 ), f'HVAC_Cooling_LB_' + increment
 
-						self.milp += delta_hvac[n][h][t] <= 5 * hvac_active[n][h][
-							t], f'HVAC_Activation_Control_' + increment
+						self.milp += delta_hvac[n][h][t] <= 5, f'HVAC_Activation_Control_' + increment
 						self.milp += hvac_power[n][h][t] == 0.2 * delta_hvac[n][h][t] * self.hvac_capacity[n][
 							h], f'HVAC_Power_Level_' + increment
 
@@ -1010,14 +1009,14 @@ class StageTwoMILPBilateral:
 									self.T_out[n][h][t] - hvac_power[n][h][t] * self.thermal_resist[n][h] -
 									hvac_temp[n][h][t - 1]) * math.exp(
 								- self._delta_t / (self.thermal_resist[n][h] * self.thermal_cap[n][h])))
-										  + self._big_m * (1 - hvac_mode_heat[n][h][
+										  + self._big_m * (1 - hvac_mode_cool[n][h][
 										t])), f'HVAC_Cooling_UB_state' + increment
 							self.milp += (hvac_temp[n][h][t] >= (
 									self.T_out[n][h][t] - hvac_power[n][h][t] * self.thermal_resist[n][h] - (
 									self.T_out[n][h][t] - hvac_power[n][h][t] * self.thermal_resist[n][h] -
 									hvac_temp[n][h][t - 1]) * math.exp(
 								- self._delta_t / (self.thermal_resist[n][h] * self.thermal_cap[n][h])))
-										  - self._big_m * (1 - hvac_mode_heat[n][h][
+										  - self._big_m * (1 - hvac_mode_cool[n][h][
 										t])), f'HVAC_Cooling_LB_state' + increment
 
 						self.milp += hvac_active[n][h][t] == hvac_mode_heat[n][h][t] + hvac_mode_cool[n][h][
@@ -1026,10 +1025,8 @@ class StageTwoMILPBilateral:
 							h], f'HVAC_On_Off_' + increment
 
 					# Force HVAC Activation If Temperature Exceeds Limits
-					self.milp += hvac_temp[n][h][t] <= self.hvac_temp_max[n][h] + self._big_m * hvac_active[n][h][
-						t], f'HVAC_Turn_On_Above_' + increment
-					self.milp += hvac_temp[n][h][t] >= self.hvac_temp_min[n][h] - self._big_m * hvac_active[n][h][
-						t], f'HVAC_Turn_On_Below_' + increment
+					# self.milp += hvac_temp[n][h][t] <= self.hvac_temp_max[n][h] + self._big_m * hvac_active[n][h][t], f'HVAC_Turn_On_Above_' + increment
+					# self.milp += hvac_temp[n][h][t] >= self.hvac_temp_min[n][h] - self._big_m * hvac_active[n][h][t], f'HVAC_Turn_On_Below_' + increment
 
 					self.milp += hvac_temp[n][h][t] - self.hvac_temp_max[n][h] <= hvac_cost_comfort[n][h][
 						t], f'HVAC_Cost_Above_UB' + increment

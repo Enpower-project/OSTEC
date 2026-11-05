@@ -179,7 +179,14 @@ class StageOneMILP:
 			# create EWH varBackpacks
 			from rec_op_lem_prices.ewh.ewh_flex import ewh_preparation
 			global varBackpack
-			varBackpack = {e: ewh_preparation(self._ewh_paramsInput[e], self._ewh_dataset[e], resample='1h') for e in self.set_ewh}
+			varBackpack = {
+				e: ewh_preparation(
+					self._ewh_paramsInput[e],
+					self._ewh_dataset[e],
+					resample={0.25: "15m", 1.0: "1h"}[self._delta_t],
+				)
+				for e in self.set_ewh
+			}
 
 			self.wh_init = {e: varBackpack[e]['wh_init'] for e in self.set_ewh}
 			self.ewh_power = {e: varBackpack[e]['ewh_power'] for e in self.set_ewh}
@@ -258,8 +265,8 @@ class StageOneMILP:
 		e_bd = dict_none_lists(self.time_intervals, self.set_btm_storage)  # energy discharged by n's batteries [kWh]
 		delta_bc = dict_none_lists(self.time_intervals, self.set_btm_storage)  # when True allows charge, else discharge
 		ev_stored = dict_none_lists(self.time_intervals, self.set_btm_evs) # energy stored in ev at period t
-		p_ev_charge = dict_none_lists(self.time_intervals, self.set_btm_evs) # power charge of ev at period t
-		p_ev_discharge = dict_none_lists(self.time_intervals, self.set_btm_evs)  # power discharge of ev at period t
+		p_ev_charge = dict_none_lists(self.time_intervals, self.set_btm_evs) # power charge of ev at period t [kW]
+		p_ev_discharge = dict_none_lists(self.time_intervals, self.set_btm_evs)  # power discharge of ev at period t [kW]
 
 		# EWH - Initialize decision variables
 		if bool(self._ewh_dataset):
@@ -389,7 +396,7 @@ class StageOneMILP:
 
 		for t in self.time_series:
 			if t != 0:
-				objective += lpSum(self.hvac_cost_comfort[h][t] * 100 for h in self.set_hvac) + lpSum(self.hp_cost_comfort[hp][t] * 1 for hp in self.set_hp)
+				objective += lpSum(self.hvac_cost_comfort[h][t] * 10 for h in self.set_hvac) + lpSum(self.hp_cost_comfort[hp][t] * 10 for hp in self.set_hp)
 
 
 
@@ -410,9 +417,9 @@ class StageOneMILP:
 			self.milp += \
 				e_cmet[t] == self._e_c[t] - self._e_g[t] \
 				+ lpSum(e_bc[b][t] - e_bd[b][t] for b in self.set_btm_storage) + \
-				+ lpSum(p_ev_charge[ev][t] - p_ev_discharge[ev][t]
+				+ lpSum(p_ev_charge[ev][t] * self._delta_t - p_ev_discharge[ev][t] * self._delta_t
 				 for ev in self.set_btm_evs) + \
-				lpSum(- varBackpack[e]['original_load'][t] + energyEWH[e][t] for e in self.set_ewh) + \
+				lpSum(energyEWH[e][t] for e in self.set_ewh) + \
 				lpSum(self.hvac_power[h][t] * self._delta_t for h in self.set_hvac) + \
 				lpSum(self.hp_power[h][t] for h in self.set_hp), \
 				'C_met_' + increment
@@ -475,22 +482,25 @@ class StageOneMILP:
 			increment = f'{ev}_t{t:03d}'
 			# Eq. 10
 			if t == 0:
-				self.milp += ev_stored[ev][t] == self._init_e_ev[ev] + self._eff_bc_ev[ev] * p_ev_charge[ev][t] \
-							 - (1/self._eff_bd_ev[ev]) * p_ev_discharge[ev][t] \
+				self.milp += ev_stored[ev][t] == self._init_e_ev[ev] \
+							 + self._eff_bc_ev[ev] * p_ev_charge[ev][t] * self._delta_t \
+							 - (1/self._eff_bd_ev[ev]) * p_ev_discharge[ev][t] * self._delta_t \
 							 - self._trip_ev[ev][t],\
 							 'EV_balance_' + increment
 			else:
-				self.milp += ev_stored[ev][t] == ev_stored[ev][t-1] + self._eff_bc_ev[ev] * p_ev_charge[ev][t] \
-							  - (1 / self._eff_bd_ev[ev]) * p_ev_discharge[ev][t] - self._trip_ev[ev][t],\
+				self.milp += ev_stored[ev][t] == ev_stored[ev][t-1] \
+							 + self._eff_bc_ev[ev] * p_ev_charge[ev][t] * self._delta_t \
+							 - (1 / self._eff_bd_ev[ev]) * p_ev_discharge[ev][t] * self._delta_t \
+							 - self._trip_ev[ev][t],\
 							 'EV_balance_' + increment
 
 			# Eq. 11
 			self.milp += (1 / self._eff_bd_ev[ev]) * p_ev_discharge[ev][t] <= self._pmax_d_ev[ev] * \
-						 self._bin_ev[ev][t] * self._delta_t, 'EV_Discharging_limit_' + increment
+						 self._bin_ev[ev][t], 'EV_Discharging_limit_' + increment
 
 			# Eq. 12
 			self.milp += self._eff_bc_ev[ev] * p_ev_charge[ev][t] <= self._pmax_c_ev[ev] * \
-						 self._bin_ev[ev][t] * self._delta_t, 'EV_Charging_limit_' + increment
+						 self._bin_ev[ev][t], 'EV_Charging_limit_' + increment
 
 			# Eq. 13
 			self.milp += ev_stored[ev][t] <= self._battery_capacity_ev[ev], 'EV_Max_capacity_' + increment
@@ -997,7 +1007,7 @@ class StageOneMILP:
 						outputs['ewh_temp'][e][step_nr] = v.varValue
 					if re.search(f'delta_in_{e}_', v.name):
 						outputs['ewh_delta_in'][e][step_nr] = v.varValue
-						outputs['ewh_optimized_load'][e][step_nr] = v.varValue * varBackpack[e]['ewh_power']
+						outputs['ewh_optimized_load'][e][step_nr] = v.varValue * varBackpack[e]['ewh_power'] * varBackpack[e]['delta_t']
 					outputs['ewh_original_load'][e] = varBackpack[e]['original_load']
 					outputs['ewh_delta_use'][e] = varBackpack[e]['delta_use']
 

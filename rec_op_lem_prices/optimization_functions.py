@@ -423,8 +423,10 @@ def run_pre_two_stage_collective_pool_milp(backpack: CollectivePreBackpackS2Pool
 	for meter_name, meter_data in backpack['meters'].items():
 		ind_bp = {
 			'btm_storage': meter_data['btm_storage'],
-			'btm_evs': meter_data['btm_evs'],
-			'ewh': meter_data['ewh'],
+			'btm_evs': meter_data.get('btm_evs'),
+			'ewh': meter_data.get('ewh'),
+			'hvac': meter_data.get('hvac'),
+			'hp': meter_data.get('hp'),
 			'delta_t': backpack['delta_t'],
 			'e_c': meter_data['e_c'],
 			'e_g': meter_data['e_g'],
@@ -529,8 +531,10 @@ def run_pre_two_stage_collective_bilateral_milp(backpack: CollectivePreBackpackS
 	for meter_name, meter_data in backpack['meters'].items():
 		ind_bp = {
 			'btm_storage': meter_data['btm_storage'],
-			'btm_evs': meter_data['btm_evs'],
-			'ewh': meter_data['ewh'],
+			'btm_evs': meter_data.get('btm_evs'),
+			'ewh': meter_data.get('ewh'),
+			'hvac': meter_data.get('hvac'),
+			'hp': meter_data.get('hp'),
 			'delta_t': backpack['delta_t'],
 			'e_c': meter_data['e_c'],
 			'e_g': meter_data['e_g'],
@@ -1146,8 +1150,10 @@ def run_pre_three_stage_collective_pool_milp(backpack: CollectivePreBackpackS3Po
 	for meter_name, meter_data in backpack['meters'].items():
 		ind_bp = {
 			'btm_storage': meter_data['btm_storage'],
-			'btm_evs': meter_data['btm_evs'],
-			'ewh': meter_data['ewh'],
+			'btm_evs': meter_data.get('btm_evs'),
+			'ewh': meter_data.get('ewh'),
+			'hvac': meter_data.get('hvac'),
+			'hp': meter_data.get('hp'),
 			'delta_t': backpack['delta_t'],
 			'e_c': meter_data['e_c'],
 			'e_g': meter_data['e_g'],
@@ -1287,8 +1293,10 @@ def run_bidding_curve(backpack: CollectivePreBackpackS3PoolDict, l_flex_ini: flo
 	for meter_name, meter_data in backpack['meters'].items():
 		ind_bp = {
 			'btm_storage': meter_data['btm_storage'],
-			'btm_evs': meter_data['btm_evs'],
-			'ewh': meter_data['ewh'],
+			'btm_evs': meter_data.get('btm_evs'),
+			'ewh': meter_data.get('ewh'),
+			'hvac': meter_data.get('hvac'),
+			'hp': meter_data.get('hp'),
 			'delta_t': backpack['delta_t'],
 			'e_c': meter_data['e_c'],
 			'e_g': meter_data['e_g'],
@@ -1457,6 +1465,8 @@ def bid_activation(backpack: CollectivePreBackpackS3PoolDict, l_flex: float, act
 			'btm_storage': meter_data.get('btm_storage', None),  # Use None as default if 'btm_storage' is not present
 			'btm_evs': meter_data.get('btm_evs', None),  # Use None as default if 'btm_evs' is not present
 			'ewh': meter_data.get('ewh', None),  # Use None as default if 'ewh' is not present
+			'hvac': meter_data.get('hvac', None),  # Use None as default if 'hvac' is not present
+			'hp': meter_data.get('hp', None),  # Use None as default if 'hp' is not present
 			'delta_t': backpack['delta_t'],
 			'e_c': meter_data['e_c'],
 			'e_g': meter_data['e_g'],

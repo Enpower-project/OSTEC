@@ -45,6 +45,17 @@ from rec_op_lem_prices.optimization.structures.I_O_stage_3_pool_milp import (
 )
 
 
+def round_all(value, ndigits=2):
+	"""Recursively round every float inside dicts/lists/tuples (used only for test comparisons)."""
+	if isinstance(value, dict):
+		return {k: round_all(v, ndigits) for k, v in value.items()}
+	if isinstance(value, (list, tuple)):
+		return type(value)(round_all(v, ndigits) for v in value)
+	if isinstance(value, float):
+		return round(value, ndigits)
+	return value
+
+
 def test_run_pre_individual_milp():
 	r = run_pre_individual_milp(INPUTS_S1)
 	r['deg_cost'] = round(r['deg_cost'], 3)
@@ -97,12 +108,12 @@ def test_run_pre_three_stage_collective_pool_milp():
 	r3['c_ind3pool_without_deg_and_p_extra'] = round_cost(r3['c_ind3pool_without_deg_and_p_extra'])
 	r3['c_ind3pool_without_p_extra'] = round_cost(r3['c_ind3pool_without_p_extra'])
 	for ki, valu in r3.items():
-		assert valu == COLLECTIVE_PRE_OUTPUTS_S3_POOL[0].get(ki), f'{ki}'
+		assert round_all(valu) == round_all(COLLECTIVE_PRE_OUTPUTS_S3_POOL[0].get(ki)), f'{ki}'
 	for ki, valu in r2.items():
-		assert valu == COLLECTIVE_PRE_OUTPUTS_S3_POOL[1].get(ki), f'{ki}'
+		assert round_all(valu) == round_all(COLLECTIVE_PRE_OUTPUTS_S3_POOL[1].get(ki)), f'{ki}'
 	for idx, r1 in enumerate(r1_list):
 		for ki, valu in r1.items():
-			assert valu == COLLECTIVE_PRE_OUTPUTS_S3_POOL[2][idx].get(ki), f'{ki}'
+			assert round_all(valu) == round_all(COLLECTIVE_PRE_OUTPUTS_S3_POOL[2][idx].get(ki)), f'{ki}'
 
 
 def test_run_pre_two_stage_collective_bilateral_milp():

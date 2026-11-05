@@ -255,7 +255,11 @@ class StageThreeMILPPool:
 
 				if self._ewh is not None:
 					varBackpack[n] = {
-						e: ewh_preparation(self._ewh_paramsInput[n][e], self._ewh_dataset[n][e], resample='1h')
+						e: ewh_preparation(
+							self._ewh_paramsInput[n][e],
+							self._ewh_dataset[n][e],
+							resample={0.25: "15m", 1.0: "1h"}[self._delta_t],
+						)
 						for e in self.set_ewh[n]
 					}
 
@@ -549,7 +553,7 @@ class StageThreeMILPPool:
 		for t in self.time_series:
 			for n in self.set_meters:
 				if t != 0:
-					objective += lpSum(hvac_cost_comfort[n][h][t] * 2 for h in self.set_hvac[n]) + lpSum(self.hp_cost_comfort[n][hp][t] * 2 for hp in self.set_hp[n])
+					objective += lpSum(hvac_cost_comfort[n][h][t] * 10 for h in self.set_hvac[n]) + lpSum(self.hp_cost_comfort[n][hp][t] * 10 for hp in self.set_hp[n])
 
 
 		self.milp += objective, 'Objective Function'
@@ -604,9 +608,9 @@ class StageThreeMILPPool:
 			self.milp += \
 				e_cmet[n][t] == self._e_c[n][t] - e_gg[n][t] \
 				+ lpSum(e_bc[n][b][t] - e_bd[n][b][t] for b in self.sets_btm_storage[n]) \
-				+ lpSum(p_ev_charge[n][ev][t] - p_ev_discharge[n][ev][t]
+				+ lpSum(p_ev_charge[n][ev][t] * self._delta_t - p_ev_discharge[n][ev][t] * self._delta_t
 				 for ev in self.sets_btm_ev[n]) \
-				+ lpSum(- varBackpack[n][e]['original_load'][t] + energyEWH[n][e][t] for e in self.set_ewh[n]) + \
+				+ lpSum(energyEWH[n][e][t] for e in self.set_ewh[n]) + \
 				lpSum(hvac_power[n][h][t] * self._delta_t for h in self.set_hvac[n]) + lpSum(self.hp_power[n][hp][t]for hp in self.set_hp[n]), \
 				'C_met_' + increment
 
@@ -795,22 +799,25 @@ class StageThreeMILPPool:
 				increment = f'{n}_{ev}_t{t:03d}'
 				# Eq. 41
 				if t == 0:
-					self.milp += ev_stored[n][ev][t] == self._init_e_ev[n][ev] + self._eff_bc_ev[n][ev] * p_ev_charge[n][ev][t] \
-								  - (1 / self._eff_bd_ev[n][ev]) * p_ev_discharge[n][ev][t] \
+					self.milp += ev_stored[n][ev][t] == self._init_e_ev[n][ev] \
+								 + self._eff_bc_ev[n][ev] * p_ev_charge[n][ev][t] * self._delta_t \
+								 - (1 / self._eff_bd_ev[n][ev]) * p_ev_discharge[n][ev][t] * self._delta_t \
 								 - self._trip_ev[n][ev][t], \
 								 'EV_balance_' + increment
 				else:
-					self.milp += ev_stored[n][ev][t] == ev_stored[n][ev][t - 1] + self._eff_bc_ev[n][ev] * p_ev_charge[n][ev][
-						t] - (1 / self._eff_bd_ev[n][ev]) * p_ev_discharge[n][ev][t] - self._trip_ev[n][ev][t], \
+					self.milp += ev_stored[n][ev][t] == ev_stored[n][ev][t - 1] \
+								 + self._eff_bc_ev[n][ev] * p_ev_charge[n][ev][t] * self._delta_t \
+								 - (1 / self._eff_bd_ev[n][ev]) * p_ev_discharge[n][ev][t] * self._delta_t \
+								 - self._trip_ev[n][ev][t], \
 								 'EV_balance_' + increment
 
 				# Eq. 42
 				self.milp += (1 / self._eff_bd_ev[n][ev]) * p_ev_discharge[n][ev][t] <= self._pmax_d_ev[n][ev] * \
-							 self._bin_ev[n][ev][t] * self._delta_t, 'EV_Discharging_limit_' + increment
+							 self._bin_ev[n][ev][t], 'EV_Discharging_limit_' + increment
 
 				# Eq. 43
 				self.milp += self._eff_bc_ev[n][ev] * p_ev_charge[n][ev][t] <= self._pmax_c_ev[n][ev] * \
-							 self._bin_ev[n][ev][t] * self._delta_t, 'EV_Charging_limit_' + increment
+							 self._bin_ev[n][ev][t], 'EV_Charging_limit_' + increment
 
 				# Eq. 44
 				self.milp += ev_stored[n][ev][t] <= self._battery_capacity_ev[n][ev], 'EV_Max_capacity_' + increment
@@ -1406,7 +1413,7 @@ class StageThreeMILPPool:
 				n = original_n_name(v.name)
 				e = original_e_name(v.name)
 				outputs['ewh_delta_in'][n][e][step_nr] = v.varValue
-				outputs['ewh_optimized_load'][n][e][step_nr] = v.varValue * varBackpack[n][e]['ewh_power']
+				outputs['ewh_optimized_load'][n][e][step_nr] = v.varValue * varBackpack[n][e]['ewh_power'] * varBackpack[n][e]['delta_t']
 				outputs['ewh_original_load'][n][e] = varBackpack[n][e]['original_load']
 				outputs['ewh_delta_use'][n][e] = varBackpack[n][e]['delta_use']
 

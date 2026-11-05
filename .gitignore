@@ -121,3 +121,7 @@ dmypy.json
 
 # Other specific files
 rec_op_lem_prices/optimization/module/*.lp
+
+# Other specific directories and files (used for testing)
+rec_op_lem_prices/devtests
+rec_op_lem_prices/test_function.py
